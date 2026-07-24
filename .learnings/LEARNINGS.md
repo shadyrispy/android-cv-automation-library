@@ -457,3 +457,95 @@ nihui 主推"minimal native build"——只构建 native 静态库,不构建 Jav
 
 ---
 
+## [LRN-20260724-016] best_practice
+
+**Logged**: 2026-07-25T00:15:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+新增独立 `workflow` Gradle 模块,实现 ECA(事件-条件-动作)编排引擎,作为可选 AAR 独立发布
+
+### Details
+**架构决策**:
+- 编排层不打包进主 AAR(`:app`),作为独立 Gradle 模块 `:workflow` 按需引入
+- 三层职责分离:原子动作层(:app) → 编排层(:workflow) → 业务层(宿主)
+- 编排层通过 `AutomationBackend` 接口与原子动作层解耦,宿主 App 实现接口注入
+
+**ECA 模型**(借鉴 Smart-AutoClicker 简化版):
+- `Scenario` = `List<Event>`
+- `Event` 分两类:`Image`(需图像分析,代价高) + `Trigger`(基于计数器/计时器,代价低)
+- `Condition` sealed class:ImageAppears / TextMatches / CounterReached / TimerReached / Custom
+- `Action` sealed class:Tap / LongPress / Swipe / Scroll / Wait / ChangeCounter / ToggleEvent / Complete / Custom
+
+**关键设计**:
+1. **两阶段求值**:先评估 Trigger(廉价)后评估 Image(昂贵),Trigger 命中可跳过 Image
+2. **短路求值**:AND 遇 false 立即返回,OR 遇 true 立即返回
+3. **Strategy 模式**:ActionExecutor 多态分发,新增 Action 类型不影响现有代码
+4. **单线程执行**:与 BotService 模型一致,通过 `AutomationBackend.isCancelled()` 协作式中断
+5. **JSON 持久化**:kotlinx.serialization,Scenario 可序列化为文件,支持热更新
+6. **DSL 构建器**:类型安全的 `scenario { }` DSL,IDE 补全友好
+
+**测试覆盖**:29 个单元测试(ProcessingState 6 + ConditionsVerifier 6 + ActionExecutor 8 + ScenarioExecutor 4 + DSL 3 + JSON 序列化 2)
+
+**新增依赖**:
+- kotlinx-serialization-json 1.6.3(~150KB)
+- kotlinx-coroutines-android 1.8.0(~80KB)
+
+**AAR 体积**:workflow-debug.aar 155KB(独立于主 AAR 的 6.5MB)
+
+**TDD 执行教训**(Subagent-Driven 模式):
+- Task 4 中 subagent 为让测试通过,错误地将 startTimer 基线硬编码为 0L,破坏生产正确性 → review 阶段发现并修复(ERR-20260724-001)
+- 教训:subagent 修复测试失败时倾向于改实现而非测试,需在 prompt 中明确"优先检查测试代码"
+- 并行派发 Task 8/9 时,两个 subagent 报告文件冲突/消失 → 后续避免并行 gradle 操作
+
+### Suggested Action
+1. 在 JitPack 配置中确认 `:workflow` 模块发布 artifactId = `automation_library-workflow`
+2. 未来在宿主项目(如 genshin-inventory-scanner-v2)中按 `com.github.shadyrispy:automation_library-workflow:<version>` 引入
+3. 后续可考虑增加可视化调试器(Scenario AST 转 Mermaid 图)
+
+### Metadata
+- Source: research
+- Related Files: workflow/, settings.gradle.kts, gradle/libs.versions.toml
+- Tags: workflow, eca, orchestration, dsl, serialization, tdd
+- See Also: LRN-20260724-015, ERR-20260724-001
+
+---
+
+## [LRN-20260724-017] knowledge_gap
+
+**Logged**: 2026-07-25T00:20:00+08:00
+**Priority**: medium
+**Status**: pending
+**Area**: backend
+
+### Summary
+ProcessingState 用 Event.name 作为 key,但 Event.id 才是唯一标识,可能导致 ToggleEvent 误操作同名事件
+
+### Details
+Task 7 测试中暴露:`Action.ToggleEvent("e1", enabled = false)` 传入的是 Event.id("e1"),但 ProcessingState 用 Event.name 作为 key。测试中 Event 的 id="e1" 而 name="self-disabling",导致 ToggleEvent 没有匹配到事件,主循环无限执行(hang)。
+
+**根因**:ProcessingState.initEvents 用 `it.name`,isEventEnabled/setEventEnabled 也按 name 查询。但 ToggleEvent 的参数名是 eventName,用户容易误传 id。
+
+**影响**:
+1. 两个同名 Event 时,ToggleEvent 会同时影响两个(应只影响一个)
+2. 用户混淆 id 和 name 导致 bug 难以排查
+
+### Suggested Action
+**推荐改为用 Event.id 作为 key**(唯一标识):
+1. `ProcessingState.initEvents` 改为 `events.map { it.id to it.enabledOnStart }`
+2. `Action.ToggleEvent` 参数改名为 `eventId`,语义更明确
+3. `ScenarioExecutor` 中 `isEventEnabled(event.name)` 改为 `isEventEnabled(event.id)`
+4. 更新相关测试
+
+**当前不修改**:本次 workflow 模块已通过 29 测试,改动范围较大,留待宿主项目集成时一并处理。
+
+### Metadata
+- Source: testing
+- Related Files: workflow/src/main/java/.../runtime/ProcessingState.kt, workflow/src/main/java/.../model/Action.kt, workflow/src/main/java/.../runtime/ScenarioExecutor.kt
+- Tags: api-design, event-id, event-name, toggle-event
+- See Also: LRN-20260724-016
+
+---
+
