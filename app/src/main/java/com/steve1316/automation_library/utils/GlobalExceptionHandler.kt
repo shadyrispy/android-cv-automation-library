@@ -30,11 +30,18 @@ class GlobalExceptionHandler(private val defaultHandler: Thread.UncaughtExceptio
     }
 
     companion object {
+        // Guard against duplicate registration which would form a long handler chain (M6 fix).
+        // BotService.onCreate and MediaProjectionService.onCreate both call register().
+        @Volatile
+        private var registered = false
+
         /**
          * Registers the GlobalExceptionHandler for the current thread.
          *
          */
         fun register() {
+            if (registered) return
+            registered = true
             Thread.setDefaultUncaughtExceptionHandler(
                 GlobalExceptionHandler(Thread.getDefaultUncaughtExceptionHandler()),
             )

@@ -15,6 +15,7 @@ import com.steve1316.automation_library.data.SharedData
 import com.steve1316.automation_library.events.ExceptionEvent
 import com.steve1316.automation_library.events.JSEvent
 import com.steve1316.automation_library.events.StartEvent
+import com.steve1316.automation_library.utils.ocr.OcrEngine
 import kotlinx.coroutines.runBlocking
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -39,6 +40,16 @@ class BotService : Service() {
     companion object {
         private lateinit var thread: Thread
         private lateinit var windowManager: WindowManager
+
+        // Track auxiliary threads so they can be interrupted/joined on cleanup (H4 fix).
+        @Volatile
+        private var ocrWarmupThread: Thread? = null
+        @Volatile
+        private var discordThread: Thread? = null
+
+        // Guard performCleanUp against concurrent/duplicate invocation (M9 fix).
+        private val cleanupLock = Any()
+        private var cleanupDone = false
 
         var isRunning = false
 
@@ -75,6 +86,18 @@ class BotService : Service() {
         // Initialize SettingsHelper for SQLite settings access.
         SettingsHelper.initialize(myContext)
 
+        // Pre-warm the OCR engine (ONNX Runtime + PP-OCRv6) on a background thread.
+        // Loading the ~3MB FP16 models + creating the ORT session can take 1-3s on first use;
+        // doing it here avoids the latency hit on the first findText() call during automation.
+        ocrWarmupThread = thread(start = true) {
+            try {
+                OcrEngine.get(myContext)
+                MessageLog.i(tag, "OCR engine pre-warmed.")
+            } catch (e: Exception) {
+                MessageLog.w(tag, "OCR engine pre-warm failed (will lazy-load on first use): ${e.message}")
+            }
+        }
+
         // Initialize the floating overlay button which handles all UI and animations.
         floatingOverlayButton = FloatingOverlayButton(this, windowManager)
 
@@ -95,6 +118,13 @@ class BotService : Service() {
 
                 isRunning = true
                 floatingOverlayButton.setRunningState(true)
+
+                // Reset the cleanup guard so performCleanUp will run for this new session (M9 fix).
+                synchronized(cleanupLock) { cleanupDone = false }
+
+                // Reset OCR performance statistics at the start of each bot session so the
+                // statsSummary() logged at cleanup reflects only this run.
+                OcrEngine.resetStats()
 
                 // Set up the notification to send the user back to their MainActivity when pressed.
                 NotificationUtils.updateNotification(myContext, Class.forName(className), true, "Automation is now running")
@@ -138,7 +168,7 @@ class BotService : Service() {
                             // Run the Discord process on a new Thread if it is enabled.
                             if (DiscordUtils.enableDiscordNotifications) {
                                 val discordUtils = DiscordUtils(myContext)
-                                thread {
+                                discordThread = thread {
                                     runBlocking {
                                         DiscordUtils.queue.clear()
                                         DiscordUtils.isRunning = true
@@ -150,7 +180,7 @@ class BotService : Service() {
                             // Send start message to signal the developer's module to begin running their entry point. Execution will go to the developer's module until it is all done.
                             EventBus.getDefault().postSticky(StartEvent("Entry Point ON"))
                         } catch (e: Exception) {
-                            if (e.toString() == "java.lang.InterruptedException" || Thread.currentThread().isInterrupted) {
+                            if (e is InterruptedException || Thread.currentThread().isInterrupted) {
                                 if (e.message?.contains("crashed") == true || e.message?.contains("stopped unexpectedly") == true) {
                                     NotificationUtils.updateNotification(myContext, Class.forName(className), false, "Bot stopped: ${e.message}")
                                 } else {
@@ -275,11 +305,39 @@ class BotService : Service() {
      *
      */
     private fun performCleanUp() {
+        // Guard against concurrent/duplicate invocation (M9 fix).
+        // Both the bot thread's finally block and onExceptionEvent can call this; only the first
+        // call should execute cleanup, the second should return immediately.
+        synchronized(cleanupLock) {
+            if (cleanupDone) return
+            cleanupDone = true
+        }
+
         // Stop any active recording first to ensure proper file finalization.
         MediaProjectionService.stopRecording()
 
-        // Stop the Discord message loop.
+        // Stop the Discord message loop and join the thread to avoid leaks (H4 fix).
         DiscordUtils.isRunning = false
+        discordThread?.let {
+            try { it.interrupt(); it.join(2000) } catch (_: InterruptedException) {}
+            discordThread = null
+        }
+
+        // Interrupt the OCR warmup thread if still running to avoid racing with OcrEngine.close() (H4 fix).
+        ocrWarmupThread?.let {
+            try { it.interrupt(); it.join(2000) } catch (_: InterruptedException) {}
+            ocrWarmupThread = null
+        }
+
+        // Dump OCR performance statistics and release native ONNX sessions + dict to avoid native
+        // memory leaks across multiple bot sessions. After close(), the next OcrEngine.get() call
+        // re-creates the engine from assets.
+        try {
+            MessageLog.i(tag, OcrEngine.statsSummary())
+        } catch (e: Exception) {
+            MessageLog.w(tag, "Failed to dump OCR stats: ${e.message}")
+        }
+        OcrEngine.close()
 
         if (!skipNotificationUpdate) {
             Log.d(tag, "BotService for $appName is now stopped and executing cleanup now...")

@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -242,10 +243,11 @@ class MediaProjectionService : Service() {
                     val rowStride = plane.rowStride
                     newBitmap = Bitmap.createBitmap(cropW, cropH, Bitmap.Config.ARGB_8888)
 
+                    // Allocate rowPixels once outside the loop to reduce GC pressure (M4 fix).
+                    val rowPixels = IntArray(cropW)
                     for (y in 0 until cropH) {
                         val sourceOffset = ((cropY + y) * rowStride) + (cropX * pixelStride)
                         buffer.position(sourceOffset)
-                        val rowPixels = IntArray(cropW)
                         buffer.asIntBuffer().get(rowPixels)
                         newBitmap.setPixels(rowPixels, 0, cropW, 0, y, cropW, 1)
                     }
@@ -287,8 +289,9 @@ class MediaProjectionService : Service() {
                     }
 
                 try {
-                    bitmapToReturn.compress(Bitmap.CompressFormat.PNG, 100, fos)
-                    fos.close()
+                    fos.use {
+                        bitmapToReturn.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
                 } catch (e: IOException) {
                     Log.e(tag, "Failed to save screenshot: ${e.message}")
                 }
@@ -332,8 +335,12 @@ class MediaProjectionService : Service() {
                     val newBitmap = createBitmap(SharedData.displayWidth + rowPadding / pixelStride, SharedData.displayHeight)
                     newBitmap.copyPixelsFromBuffer(buffer)
 
-                    // Update the cache.
+                    // Update the cache, recycling the previous bitmap to avoid native memory leaks (C1 fix).
+                    // Safe because BotService.thread is the only consumer of takeScreenshotNow; no concurrent
+                    // readers hold the old lastBitmap reference when the next screenshot is taken.
+                    val oldBitmap = lastBitmap
                     lastBitmap = newBitmap
+                    oldBitmap?.recycle()
                     lastBitmapIsFromException = false
                 } finally {
                     image.close()
@@ -359,8 +366,9 @@ class MediaProjectionService : Service() {
                     }
 
                 try {
-                    bitmapToReturn.compress(Bitmap.CompressFormat.PNG, 100, fos)
-                    fos.close()
+                    fos.use {
+                        bitmapToReturn.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
                 } catch (e: IOException) {
                     Log.e(tag, "Failed to save screenshot: ${e.message}")
                 }
@@ -470,15 +478,11 @@ class MediaProjectionService : Service() {
         // Register the Global Exception Handler to catch any uncaught exceptions and log them.
         GlobalExceptionHandler.register()
 
-        // Now, start a new Thread to handle processing new screenshots.
-        object : Thread() {
-            override fun run() {
-                Log.d(tag, "Thread running for MediaProjection service.")
-                threadHandler = Handler(Looper.getMainLooper())
-                Looper.prepare()
-                Looper.loop()
-            }
-        }.start()
+        // Use the main looper for the screenshot handler (C8 fix).
+        // Previously a dedicated Thread with Looper.prepare()/loop() was created but never quit(),
+        // leaking a thread per Service restart. The main looper is sufficient since threadHandler
+        // is only used for periodic screenshot polling via postDelayed.
+        threadHandler = Handler(Looper.getMainLooper())
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -524,7 +528,12 @@ class MediaProjectionService : Service() {
             val contentIntent: Intent = packageManager.getLaunchIntentForPackage(packageName)!!
             val name = contentIntent.component!!.className
             val (notification, notificationID) = NotificationUtils.getNewNotification(this, Class.forName(name))
-            startForeground(notificationID, notification)
+            // Android 10+ 要求 startForeground 传入 foregroundServiceType;Android 14+ 强制要求,否则 SecurityException
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(notificationID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(notificationID, notification)
+            }
 
             val resultCode = intent.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED)
             val data: Intent? = intent.getParcelableExtra("DATA")
@@ -549,6 +558,18 @@ class MediaProjectionService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        // Disable the orientation listener to prevent the system from retaining a reference to
+        // the Service via the non-static inner OrientationChangeCallback (M7 fix). Normally the
+        // listener is disabled inside MediaProjectionStopCallback.onStop(), but if the Service is
+        // torn down without going through that path (force-stop, system kill, etc.), the listener
+        // would otherwise keep the Service alive.
+        orientationChangeCallback?.disable()
+        orientationChangeCallback = null
     }
 
     /**

@@ -1,13 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ===== Permissions required by the automation library ===== -->
+
+    <!-- Overlay button (FloatingOverlayButton) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Foreground services (MediaProjectionService / BotService) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ requires per-type permission for mediaProjection foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Battery optimization exemption (BatteryOptimizationUtils) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application>
-        <!--Disable ML Kit's automatic ContentProvider initialization so a rare double-init race cannot crash the consuming app at startup.-->
-        <!--ML Kit is initialized manually and defensively in ImageUtils instead.-->
-        <provider
-            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
-            tools:node="remove" />
+        <!-- Permission guide activity: single-page multi-card UI for overlay + accessibility + media projection authorization. -->
+        <!-- Declared in library manifest so manifest-merger auto-registers it in the consuming app. -->
+        <activity
+            android:name="com.steve1316.automation_library.utils.PermissionGuideActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 
 </manifest>

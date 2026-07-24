@@ -29,6 +29,11 @@ android {
         minSdk = libs.versions.app.minSdk.get().toInt()
         buildConfigField("String", "VERSION_NAME", "\"${libs.versions.app.versionName.get()}\"")
         consumerProguardFiles("consumer-rules.pro")
+
+        // 本地精简版 OpenCV:仅 arm64-v8a ABI(由本地 jniLibs 提供 libopencv_java4.so)
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -69,11 +74,17 @@ dependencies {
 
     api(libs.bundles.androidApp)
 
-    // OpenCV Android for image processing.
-    api(libs.opencv.android.sdk)
+    // CardView for permission guide UI cards.
+    api(libs.androidx.cardview)
 
-    // Tesseract4Android for OCR text recognition.
-    api(libs.tesseract4android)
+    // Activity-ktx for registerForActivityResult in permission guide.
+    api(libs.androidx.activity)
+
+    // OpenCV Android for image processing.
+    // 注:已切换为本地精简版 OpenCV(仅 core/imgproc/imgcodecs + Java 绑定)
+    // - Java 源码:app/src/main/java/org/opencv/
+    // - native 库:app/src/main/jniLibs/arm64-v8a/libopencv_java4.so (8.1MB,官方约 40MB)
+    // 原依赖:api(libs.opencv.android.sdk)
 
     // string-similarity to compare the string from OCR to the strings in data.
     api(libs.stringSimilarity)
@@ -87,8 +98,8 @@ dependencies {
     // EventBus to communicate between modules and to the Javascript frontend.
     api(libs.eventbus)
 
-    // Google's Firebase Machine Learning OCR for Text Detection.
-    api(libs.mlkitTextRecognition)
+    // ONNX Runtime for PP-OCRv6 inference (replacing Tesseract + ML Kit).
+    api(libs.onnxruntime.android)
 
     // Twitter4j is used to connect to the Twitter API.
     api(libs.twitter4j.core)

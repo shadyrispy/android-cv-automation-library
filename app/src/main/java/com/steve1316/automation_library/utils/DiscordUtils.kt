@@ -66,50 +66,53 @@ open class DiscordUtils(myContext: Context) {
             return
         }
 
-        val user =
-            try {
-                if (discordUserID == "") {
-                    Log.d(tag, "[DISCORD] Discord user ID is empty. Cannot find user.")
+        // Wrap all client usage in a single try/finally so early-exit paths still shutdown the client (H5 fix).
+        try {
+            val user =
+                try {
+                    if (discordUserID == "") {
+                        Log.d(tag, "[DISCORD] Discord user ID is empty. Cannot find user.")
+                        return
+                    }
+                    client.getUser(Snowflake(discordUserID.toLong()))
+                } catch (_: Exception) {
+                    Log.d(tag, "[DISCORD] Failed to find user using provided user ID.")
                     return
                 }
-                client.getUser(Snowflake(discordUserID.toLong()))
-            } catch (_: Exception) {
+
+            if (user == null) {
                 Log.d(tag, "[DISCORD] Failed to find user using provided user ID.")
                 return
             }
 
-        if (user == null) {
-            Log.d(tag, "[DISCORD] Failed to find user using provided user ID.")
-            return
-        }
-
-        try {
-            dmChannel = user.getDmChannel()
-        } catch (_: Exception) {
-            Log.d(tag, "[DISCORD] Failed to open DM channel with user.")
-            return
-        }
-
-        Log.d(tag, "Successfully fetched reference to user and their DM channel.")
-
-        try {
-            // Loop and send any messages inside the Queue.
-            while (isRunning) {
-                if (queue.isNotEmpty()) {
-                    val message = queue.remove()
-                    sendMessage(message)
-                }
-
-                // Yield to other coroutines and add a small delay to avoid busy-waiting.
-                yield()
-                delay(100)
+            try {
+                dmChannel = user.getDmChannel()
+            } catch (_: Exception) {
+                Log.d(tag, "[DISCORD] Failed to open DM channel with user.")
+                return
             }
 
-            Log.d(tag, "Terminated connection to Discord API.")
-        } catch (e: Exception) {
-            Log.e(tag, e.stackTraceToString())
+            Log.d(tag, "Successfully fetched reference to user and their DM channel.")
+
+            try {
+                // Loop and send any messages inside the Queue.
+                while (isRunning) {
+                    if (queue.isNotEmpty()) {
+                        val message = queue.remove()
+                        sendMessage(message)
+                    }
+
+                    // Yield to other coroutines and add a small delay to avoid busy-waiting.
+                    yield()
+                    delay(100)
+                }
+
+                Log.d(tag, "Terminated connection to Discord API.")
+            } catch (e: Exception) {
+                Log.e(tag, e.stackTraceToString())
+            }
         } finally {
-            // Cleanly shut down the Kord client.
+            // Cleanly shut down the Kord client on all paths (H5 fix).
             client.shutdown()
         }
     }

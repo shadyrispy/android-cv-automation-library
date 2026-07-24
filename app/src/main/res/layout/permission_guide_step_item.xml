@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="2dp"
+    app:cardUseCompatPadding="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="16dp">
+
+        <ImageView
+            android:id="@+id/permission_step_icon"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="@null"
+            android:src="@drawable/permission_step_denied" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/permission_step_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#212121"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/permission_step_desc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#757575"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/permission_step_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/permission_step_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="88dp"
+            android:text="@string/permission_action_grant" />
+
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

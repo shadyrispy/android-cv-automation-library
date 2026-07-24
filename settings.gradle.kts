@@ -8,6 +8,10 @@ rootProject.name = "Automation Library"
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 国内镜像:优先使用阿里云镜像避免 dl.google.com SSL 失败
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/central") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
         google()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }

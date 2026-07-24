@@ -11,6 +11,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -148,6 +149,14 @@ class FloatingOverlayButton(
         val prefs = context.getSharedPreferences("OverlayPrefs", Context.MODE_PRIVATE)
         overlayLayoutParams.x = prefs.getInt("lastX", overlayLayoutParams.x)
         overlayLayoutParams.y = prefs.getInt("lastY", overlayLayoutParams.y)
+
+        // 检查悬浮窗权限,缺失时抛出带提示的异常,避免 BadTokenException 崩溃
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+            throw SecurityException(
+                "Overlay permission (SYSTEM_ALERT_WINDOW) not granted. " +
+                    "Call PermissionGuide.start(activity) to guide the user through authorization first.",
+            )
+        }
 
         windowManager.addView(overlayView, overlayLayoutParams)
 

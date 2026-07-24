@@ -1,8 +1,8 @@
 [versions]
 # The Android Studio warning about these not being used in any build scripts is wrong and can be ignored.
 # https://issuetracker.google.com/issues/343889864
-app-compileSdk = "36"
-app-buildToolsVersion = "36.0.0"
+app-compileSdk = "35"
+app-buildToolsVersion = "35.0.0"
 app-minSdk = "24"
 #noinspection ExpiredTargetSdkVersion
 app-targetSdk = "30"
@@ -10,21 +10,22 @@ app-versionName = "2.5.8"
 app-jvm-toolchain = "17"
 
 
-androidGradleBuildTools = "8.12.0"
+androidGradleBuildTools = "8.7.2"
 kord = "0.17.0"
 kotlinGradlePlugin = "2.2.0"
 androidx-core = "1.17.0"
 androidx-preference = "1.2.1"
 androidx-documentfile = "1.1.0"
-tesseract4android = "4.9.0"
+androidx-cardview = "1.0.0"
+androidx-activity = "1.9.3"
 stringSimiliarity = "1.0.0"
 klaxon = "5.6"
 eventbus = "3.3.1"
-mlkitTextRecognition = "16.0.1"
 opencvAndroidSdk = "4.12.0"
 appUpdater = "2.7"
 twitter4jCore = "4.1.2"
 ktlint = "14.2.0"
+onnxRuntime = "1.20.0"
 
 [libraries]
 androidGradleBuildTools = { group = "com.android.tools.build", name = "gradle", version.ref = "androidGradleBuildTools" }
@@ -33,14 +34,15 @@ kotlinGradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plu
 androidx-core = { group = "androidx.core", name = "core-ktx", version.ref = "androidx-core" }
 androidx-preference = { group = "androidx.preference", name = "preference-ktx", version.ref = "androidx-preference" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "androidx-documentfile" }
-tesseract4android = { group = "cz.adaptech.tesseract4android", name = "tesseract4android", version.ref = "tesseract4android" }
+androidx-cardview = { group = "androidx.cardview", name = "cardview", version.ref = "androidx-cardview" }
+androidx-activity = { group = "androidx.activity", name = "activity-ktx", version.ref = "androidx-activity" }
 stringSimilarity = { group = "net.ricecode", name = "string-similarity", version.ref = "stringSimiliarity"}
 klaxon = { group = "com.beust", name = "klaxon", version.ref = "klaxon" }
 eventbus = { group = "org.greenrobot", name = "eventbus", version.ref = "eventbus" }
-mlkitTextRecognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition"}
 appUpdater = { group = "com.github.javiersantos", name = "AppUpdater", version.ref = "appUpdater" }
 opencv-android-sdk = { module = "com.github.steve1316:opencv-android-sdk", version.ref = "opencvAndroidSdk" }
 twitter4j-core = { module = "org.twitter4j:twitter4j-core", version.ref = "twitter4jCore" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxRuntime" }
 
 [bundles]
 androidApp = ["androidx-core", "androidx-preference", "androidx-documentfile"]

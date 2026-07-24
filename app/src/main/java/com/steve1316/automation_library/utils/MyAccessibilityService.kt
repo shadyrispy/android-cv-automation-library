@@ -3,9 +3,9 @@ package com.steve1316.automation_library.utils
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
-import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.res.Resources
 import android.graphics.Bitmap
@@ -13,6 +13,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Path
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -36,7 +37,7 @@ class MyAccessibilityService : AccessibilityService() {
 
         // Other classes need this static reference to this service as calling dispatchGesture() would not work.
         @SuppressLint("StaticFieldLeak")
-        private lateinit var instance: MyAccessibilityService
+        private var instance: MyAccessibilityService? = null
 
         var enableTextToPaste: Boolean = false
         var textToPaste: String = ""
@@ -54,13 +55,14 @@ class MyAccessibilityService : AccessibilityService() {
          * @return Static reference to MyAccessibilityService.
          */
         fun getInstance(): MyAccessibilityService {
-            if (!::instance.isInitialized) {
+            val inst = instance
+            if (inst == null) {
                 throw IllegalStateException("Accessibility Service not initialized. Disable and re-enable the Accessibility Service.")
             }
             if (!BotService.isRunning) {
                 throw IllegalStateException("Accessibility Service is not running. Enable the Accessibility Service.")
             }
-            return instance
+            return inst
         }
 
         /**
@@ -94,19 +96,25 @@ class MyAccessibilityService : AccessibilityService() {
         }
 
         /**
-         * Check if this service is alive and running.
+         * Check if this accessibility service is enabled in system Settings.
+         *
+         * Uses Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES instead of the deprecated
+         * ActivityManager.getRunningServices() which only returns the calling app's own services
+         * on Android 8+ and cannot detect system-managed accessibility services.
          *
          * @param context The application context.
-         * @return True if the service is alive.
+         * @return True if the service is enabled in accessibility settings.
          */
         fun checkStatus(context: Context): Boolean {
-            val manager = context.getSystemService(ACTIVITY_SERVICE) as ActivityManager
-            for (serviceInfo in manager.getRunningServices(Integer.MAX_VALUE)) {
-                if (serviceInfo.service.className.contains("MyAccessibilityService")) {
-                    return true
-                }
-            }
-            return false
+            val expectedComponent = ComponentName(context, MyAccessibilityService::class.java).flattenToString()
+            val enabledServices = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            ) ?: return false
+
+            // 标准分隔符为 ":",EMUI 部分版本使用 ";"
+            val services = enabledServices.split(":", ";")
+            return services.any { it.equals(expectedComponent, ignoreCase = true) }
         }
     }
 
@@ -171,6 +179,9 @@ class MyAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
 
+        // Clear the static reference to release the Service Context (H3 fix).
+        instance = null
+
         Log.d(tag, "Accessibility Service for $appName is now stopped.")
         AndroidComponents.showCustomToast(myContext, "Accessibility Service for $appName is now stopped.", 1000)
     }
@@ -192,9 +203,6 @@ class MyAccessibilityService : AccessibilityService() {
      * @return Pair of integers that represent the newly randomized tap location.
      */
     private fun randomizeTapLocation(x: Double, y: Double, imageName: String? = null): Pair<Int, Int> {
-        // Get the Bitmap from the template image file inside the specified folder.
-        val templateBitmap: Bitmap
-
         if (imageName == null) {
             return Pair(x.toInt(), y.toInt())
         }
@@ -209,10 +217,11 @@ class MyAccessibilityService : AccessibilityService() {
                     }
 
                 myContext.assets?.open("$newImageSubFolder$imageName.${SharedData.templateImageExt}").use { inputStream ->
-                    // Get the Bitmap from the template image file and then start matching.
-                    templateBitmap = BitmapFactory.decodeStream(inputStream)
+                    // Read only the image dimensions without decoding pixels into memory (C8 fix).
+                    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeStream(inputStream, null, opts)
+                    Pair(opts.outWidth, opts.outHeight)
                 }
-                Pair(templateBitmap.width, templateBitmap.height)
             } catch (e: FileNotFoundException) {
                 Log.e(tag, "Cannot find the image asset file: $e")
                 Log.e(tag, "Using a region of 25x25 as a fallback in order to proceed with tap location randomization.")
@@ -240,7 +249,7 @@ class MyAccessibilityService : AccessibilityService() {
             newY = y0 + newHeight
 
             // If the new coordinates are within the bounds of the template image, break out of the loop.
-            if (newX > x0 || newX < x1 || newY > y0 || newY < y1) {
+            if (newX > x0 && newX < x1 && newY > y0 && newY < y1) {
                 break
             }
         }

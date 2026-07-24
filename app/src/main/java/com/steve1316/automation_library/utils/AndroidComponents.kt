@@ -9,6 +9,11 @@ import android.widget.Toast
  * Shared Android components file that holds custom implementations of Android elements.
  */
 object AndroidComponents {
+    // Single reusable Handler bound to the main looper. The main looper is process-global
+    // and lives for the lifetime of the app, so one Handler can serve every toast without
+    // allocating a new instance per call (L4 fix).
+    private val mainHandler: Handler = Handler(Looper.getMainLooper())
+
     /**
      * Displays a Toast with a custom duration.
      *
@@ -21,8 +26,8 @@ object AndroidComponents {
         val toast = Toast.makeText(context, text, Toast.LENGTH_SHORT)
         toast.show()
 
-        // Use a Handler to cancel the Toast after the specified duration.
-        Handler(Looper.getMainLooper()).postDelayed({
+        // Reuse the shared main-looper Handler to cancel the Toast after the specified duration.
+        mainHandler.postDelayed({
             toast.cancel()
         }, durationMs)
     }

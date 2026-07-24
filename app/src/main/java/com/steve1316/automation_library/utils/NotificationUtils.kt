@@ -22,7 +22,7 @@ class NotificationUtils {
     companion object {
         private const val tag: String = "${SharedData.loggerTag}NotificationUtils"
 
-        private lateinit var notificationManager: NotificationManager
+        private var notificationManager: NotificationManager? = null
         private const val NOTIFICATION_ID: Int = 1
         private const val CHANNEL_ID: String = "STATUS"
 
@@ -41,7 +41,9 @@ class NotificationUtils {
             val newNotification = createNewNotification(context, contentClass)
 
             // Get the NotificationManager and then send the new Notification to it.
-            notificationManager.notify(NOTIFICATION_ID, newNotification)
+            // notificationManager is initialized inside createNewNotificationChannel(); guard
+            // against the (theoretically impossible) null case for safety (L2 fix).
+            notificationManager?.notify(NOTIFICATION_ID, newNotification)
 
             return Pair(newNotification, NOTIFICATION_ID)
         }
@@ -63,7 +65,7 @@ class NotificationUtils {
                 mChannel.description = "Displays status of $channelName, whether it is running or not."
 
                 // Register the channel with the system; you can't change the importance or other notification behaviors after this.
-                notificationManager.createNotificationChannel(mChannel)
+                notificationManager?.createNotificationChannel(mChannel)
             }
         }
 
@@ -196,7 +198,7 @@ class NotificationUtils {
                     }
                 }
 
-            notificationManager.notify(NOTIFICATION_ID, newNotification)
+            notificationManager?.notify(NOTIFICATION_ID, newNotification)
         }
 
         /**
@@ -206,15 +208,16 @@ class NotificationUtils {
          * @param context The application context.
          */
         fun cancelAllNotifications(context: Context) {
-            if (!::notificationManager.isInitialized) {
+            if (notificationManager == null) {
                 notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             }
+            val nm = notificationManager ?: return
             Log.d(tag, "Attempting to cancel all notifications")
-            Log.d(tag, "Active notifications before cancel: ${notificationManager.activeNotifications.size}")
-            notificationManager.cancelAll()
+            Log.d(tag, "Active notifications before cancel: ${nm.activeNotifications.size}")
+            nm.cancelAll()
 
             // Log active notifications after cancel.
-            val activeNotifications = notificationManager.activeNotifications
+            val activeNotifications = nm.activeNotifications
             Log.d(tag, "Active notifications after cancel: ${activeNotifications.size}")
             for (notification in activeNotifications) {
                 Log.d(tag, "  - ID: ${notification.id}, Tag: ${notification.tag}, Package: ${notification.packageName}")

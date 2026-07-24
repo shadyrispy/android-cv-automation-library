@@ -4,17 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.PointF
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
 import androidx.core.graphics.scale
-import com.google.mlkit.common.MlKit
-import com.google.mlkit.common.MlKitException
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import com.googlecode.tesseract.android.TessBaseAPI
 import com.steve1316.automation_library.data.SharedData
+import com.steve1316.automation_library.utils.ocr.OcrEngine
+import com.steve1316.automation_library.utils.ocr.OcrResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.opencv.android.Utils
@@ -30,8 +27,6 @@ import java.net.URL
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.*
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.collections.ArrayList
 import kotlin.math.abs
 import kotlin.math.max
@@ -97,22 +92,9 @@ open class ImageUtils(protected val context: Context) {
     // //////////////////////////////////////////////////////////////////
     // OCR configuration
 
-    // ML Kit's automatic ContentProvider init is disabled in the manifest to avoid a rare startup double-init crash.
-    // Initialize it here before any ML Kit client is created or used, and catch IllegalStateException so a redundant init is a no-op instead of a crash.
-    init {
-        try {
-            MlKit.initialize(context)
-        } catch (e: IllegalStateException) {
-            Log.w(tag, "ML Kit was already initialized: ${e.message}")
-        }
-    }
-
-    protected val googleTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    protected lateinit var tessBaseAPI: TessBaseAPI
-    protected lateinit var tessDigitsBaseAPI: TessBaseAPI
-
-    // Single lock guarding all access to the shared, non-thread-safe Tesseract API instances above.
-    private val tesseractLock = Any()
+    // PP-OCRv6 ONNX Runtime engine (lazy singleton loaded via OcrEngine.get).
+    // Replaces the previous ML Kit + Tesseract dual-engine setup.
+    protected val ocrEngine: OcrEngine by lazy { OcrEngine.get(context) }
 
     init {
         // Set the match file path to the bot's internal temp folder.
@@ -279,93 +261,104 @@ open class ImageUtils(protected val context: Context) {
             // Create the Mats of both source and template images.
             val sourceMat = Mat()
             val templateMat = Mat()
-            Utils.bitmapToMat(srcBitmap, sourceMat)
-            Utils.bitmapToMat(tmp, templateMat)
+            var clampedTemplateMat: Mat = templateMat
+            var resultMat: Mat? = null
+            try {
+                Utils.bitmapToMat(srcBitmap, sourceMat)
+                Utils.bitmapToMat(tmp, templateMat)
 
-            // Clamp template dimensions to source dimensions if template is too large.
-            val clampedTemplateMat =
-                if (templateMat.cols() > sourceMat.cols() || templateMat.rows() > sourceMat.rows()) {
-                    Log.d(tag, "Image sizes for match assertion failed - sourceMat: ${sourceMat.size()}, templateMat: ${templateMat.size()}")
-                    // Create a new Mat with clamped dimensions.
-                    val clampedWidth = minOf(templateMat.cols(), sourceMat.cols())
-                    val clampedHeight = minOf(templateMat.rows(), sourceMat.rows())
-                    Mat(templateMat, Rect(0, 0, clampedWidth, clampedHeight))
-                } else {
-                    templateMat
-                }
-
-            // Make the Mats grayscale for the source and the template.
-            Imgproc.cvtColor(sourceMat, sourceMat, Imgproc.COLOR_BGR2GRAY)
-            Imgproc.cvtColor(clampedTemplateMat, clampedTemplateMat, Imgproc.COLOR_BGR2GRAY)
-
-            // Create the result matrix.
-            val resultColumns: Int = sourceMat.cols() - clampedTemplateMat.cols() + 1
-            val resultRows: Int = sourceMat.rows() - clampedTemplateMat.rows() + 1
-            val resultMat = Mat(resultRows, resultColumns, CvType.CV_32FC1)
-
-            // Now perform the matching and localize the result.
-            Imgproc.matchTemplate(sourceMat, clampedTemplateMat, resultMat, matchMethod)
-            val mmr: Core.MinMaxLocResult = Core.minMaxLoc(resultMat)
-
-            var matchLocation = Point()
-            var matchCheck = false
-
-            // Format minVal or maxVal.
-            val minVal: Double = decimalFormat.format(mmr.minVal).toDouble()
-            val maxVal: Double = decimalFormat.format(mmr.maxVal).toDouble()
-
-            // Depending on which matching method was used, the algorithms determine which location was the best.
-            if ((matchMethod == Imgproc.TM_SQDIFF || matchMethod == Imgproc.TM_SQDIFF_NORMED) && mmr.minVal <= (1.0 - setConfidence)) {
-                matchLocation = mmr.minLoc
-                matchCheck = true
-                if (debugMode) {
-                    MessageLog.d(tag, "Match found for \"$templateName\" with $minVal <= ${1.0 - setConfidence} at Point $matchLocation using scale: $newScale.")
-                }
-            } else if ((matchMethod != Imgproc.TM_SQDIFF && matchMethod != Imgproc.TM_SQDIFF_NORMED) && mmr.maxVal >= setConfidence) {
-                matchLocation = mmr.maxLoc
-                matchCheck = true
-                if (debugMode) {
-                    MessageLog.d(tag, "Match found for \"$templateName\" with $maxVal >= $setConfidence at Point $matchLocation using scale: $newScale.")
-                }
-            } else {
-                if (debugMode) {
-                    if ((matchMethod != Imgproc.TM_SQDIFF && matchMethod != Imgproc.TM_SQDIFF_NORMED)) {
-                        MessageLog.d(tag, "Match not found for \"$templateName\" with $maxVal not >= $setConfidence at Point ${mmr.maxLoc} using scale $newScale.")
+                // Clamp template dimensions to source dimensions if template is too large.
+                clampedTemplateMat =
+                    if (templateMat.cols() > sourceMat.cols() || templateMat.rows() > sourceMat.rows()) {
+                        Log.d(tag, "Image sizes for match assertion failed - sourceMat: ${sourceMat.size()}, templateMat: ${templateMat.size()}")
+                        // Create a new Mat with clamped dimensions.
+                        val clampedWidth = minOf(templateMat.cols(), sourceMat.cols())
+                        val clampedHeight = minOf(templateMat.rows(), sourceMat.rows())
+                        Mat(templateMat, Rect(0, 0, clampedWidth, clampedHeight))
                     } else {
-                        MessageLog.d(tag, "Match not found for \"$templateName\" with $minVal not <= ${1.0 - setConfidence} at Point ${mmr.minLoc} using scale $newScale.")
+                        templateMat
+                    }
+
+                // Make the Mats grayscale for the source and the template.
+                Imgproc.cvtColor(sourceMat, sourceMat, Imgproc.COLOR_BGR2GRAY)
+                Imgproc.cvtColor(clampedTemplateMat, clampedTemplateMat, Imgproc.COLOR_BGR2GRAY)
+
+                // Create the result matrix.
+                val resultColumns: Int = sourceMat.cols() - clampedTemplateMat.cols() + 1
+                val resultRows: Int = sourceMat.rows() - clampedTemplateMat.rows() + 1
+                resultMat = Mat(resultRows, resultColumns, CvType.CV_32FC1)
+
+                // Now perform the matching and localize the result.
+                Imgproc.matchTemplate(sourceMat, clampedTemplateMat, resultMat, matchMethod)
+                val mmr: Core.MinMaxLocResult = Core.minMaxLoc(resultMat)
+
+                var matchLocation = Point()
+                var matchCheck = false
+
+                // Format minVal or maxVal.
+                val minVal: Double = decimalFormat.format(mmr.minVal).toDouble()
+                val maxVal: Double = decimalFormat.format(mmr.maxVal).toDouble()
+
+                // Depending on which matching method was used, the algorithms determine which location was the best.
+                if ((matchMethod == Imgproc.TM_SQDIFF || matchMethod == Imgproc.TM_SQDIFF_NORMED) && mmr.minVal <= (1.0 - setConfidence)) {
+                    matchLocation = mmr.minLoc
+                    matchCheck = true
+                    if (debugMode) {
+                        MessageLog.d(tag, "Match found for \"$templateName\" with $minVal <= ${1.0 - setConfidence} at Point $matchLocation using scale: $newScale.")
+                    }
+                } else if ((matchMethod != Imgproc.TM_SQDIFF && matchMethod != Imgproc.TM_SQDIFF_NORMED) && mmr.maxVal >= setConfidence) {
+                    matchLocation = mmr.maxLoc
+                    matchCheck = true
+                    if (debugMode) {
+                        MessageLog.d(tag, "Match found for \"$templateName\" with $maxVal >= $setConfidence at Point $matchLocation using scale: $newScale.")
+                    }
+                } else {
+                    if (debugMode) {
+                        if ((matchMethod != Imgproc.TM_SQDIFF && matchMethod != Imgproc.TM_SQDIFF_NORMED)) {
+                            MessageLog.d(tag, "Match not found for \"$templateName\" with $maxVal not >= $setConfidence at Point ${mmr.maxLoc} using scale $newScale.")
+                        } else {
+                            MessageLog.d(tag, "Match not found for \"$templateName\" with $minVal not <= ${1.0 - setConfidence} at Point ${mmr.minLoc} using scale $newScale.")
+                        }
                     }
                 }
-            }
 
-            if (matchCheck) {
-                if (debugMode) {
-                    // Draw a rectangle around the supposed best matching location and then save the match into a file in /files/temp/ directory. This is for debugging purposes to see if this
-                    // algorithm found the match accurately or not.
-                    if (matchFilePath != "") {
-                        Imgproc.rectangle(sourceMat, matchLocation, Point(matchLocation.x + templateMat.cols(), matchLocation.y + templateMat.rows()), Scalar(0.0, 128.0, 0.0), 10)
-                        Imgcodecs.imwrite("$matchFilePath/match.png", sourceMat)
+                if (matchCheck) {
+                    if (debugMode) {
+                        // Draw a rectangle around the supposed best matching location and then save the match into a file in /files/temp/ directory. This is for debugging purposes to see if this
+                        // algorithm found the match accurately or not.
+                        if (matchFilePath != "") {
+                            Imgproc.rectangle(sourceMat, matchLocation, Point(matchLocation.x + templateMat.cols(), matchLocation.y + templateMat.rows()), Scalar(0.0, 128.0, 0.0), 10)
+                            Imgcodecs.imwrite("$matchFilePath/match.png", sourceMat)
+                        }
                     }
+
+                    // Center the coordinates so that any tap gesture would be directed at the center of that match location instead of the default
+                    // position of the top left corner of the match location.
+                    matchLocation.x += (templateMat.cols() / 2)
+                    matchLocation.y += (templateMat.rows() / 2)
+
+                    // If a custom region was specified, readjust the coordinates to reflect the fullscreen source screenshot.
+                    if (!region.contentEquals(intArrayOf(0, 0, 0, 0))) {
+                        matchLocation.x = sourceBitmap.width - (sourceBitmap.width - (region[0] + matchLocation.x))
+                        matchLocation.y = sourceBitmap.height - (sourceBitmap.height - (region[1] + matchLocation.y))
+                    }
+
+                    return Pair(true, matchLocation)
                 }
-
-                // Center the coordinates so that any tap gesture would be directed at the center of that match location instead of the default
-                // position of the top left corner of the match location.
-                matchLocation.x += (templateMat.cols() / 2)
-                matchLocation.y += (templateMat.rows() / 2)
-
-                // If a custom region was specified, readjust the coordinates to reflect the fullscreen source screenshot.
-                if (!region.contentEquals(intArrayOf(0, 0, 0, 0))) {
-                    matchLocation.x = sourceBitmap.width - (sourceBitmap.width - (region[0] + matchLocation.x))
-                    matchLocation.y = sourceBitmap.height - (sourceBitmap.height - (region[1] + matchLocation.y))
-                }
-
-                return Pair(true, matchLocation)
+            } finally {
+                // Release native Mat memory in all paths (success, failure, exception).
+                sourceMat.release()
+                templateMat.release()
+                // clampedTemplateMat may alias templateMat when no clamping was needed; avoid double-free.
+                if (clampedTemplateMat !== templateMat) clampedTemplateMat.release()
+                resultMat?.release()
+                // Release the scaled tmp Bitmap if it was newly created (not aliased to templateBitmap).
+                if (tmp !== templateBitmap) tmp.recycle()
             }
-
-            sourceMat.release()
-            templateMat.release()
-            clampedTemplateMat.release()
-            resultMat.release()
         }
+
+        // Release the region-cropped srcBitmap if it was newly created (not aliased to sourceBitmap).
+        if (srcBitmap !== sourceBitmap) srcBitmap.recycle()
 
         return Pair(false, null)
     }
@@ -432,8 +425,9 @@ open class ImageUtils(protected val context: Context) {
         var resultMat = Mat()
         var clampedTemplateMat: Mat? = null
 
-        // Set templateMat at whatever scale it found the very first match for the next while loop.
-        while (!matchCheck && scales.isNotEmpty()) {
+        try {
+            // Set templateMat at whatever scale it found the very first match for the next while loop.
+            while (!matchCheck && scales.isNotEmpty()) {
             if (!BotService.isRunning) {
                 throw InterruptedException()
             }
@@ -450,6 +444,8 @@ open class ImageUtils(protected val context: Context) {
             // Create the Mats of both source and template images.
             Utils.bitmapToMat(srcBitmap, sourceMat)
             Utils.bitmapToMat(tmp, templateMat)
+            // Release the scaled tmp Bitmap immediately after copying into the Mat (C3 fix).
+            if (tmp !== templateBitmap) tmp.recycle()
 
             // Clamp template dimensions to source dimensions if template is too large.
             clampedTemplateMat =
@@ -474,6 +470,8 @@ open class ImageUtils(protected val context: Context) {
                 break
             }
 
+            // 释放上一轮的 resultMat,避免重新赋值时泄漏 native 内存
+            resultMat.release()
             resultMat = Mat(resultRows, resultColumns, CvType.CV_32FC1)
 
             // Now perform the matching and localize the result.
@@ -621,12 +619,16 @@ open class ImageUtils(protected val context: Context) {
             }
         }
 
-        sourceMat.release()
-        templateMat.release()
-        clampedTemplateMat?.release()
-        resultMat.release()
-
         return matchLocations
+        } finally {
+            // 确保 throw InterruptedException 或正常返回时都释放 native Mat
+            sourceMat.release()
+            templateMat.release()
+            clampedTemplateMat?.release()
+            resultMat.release()
+            // Release the region-cropped srcBitmap if it was newly created (C5 fix).
+            if (srcBitmap !== sourceBitmap) srcBitmap.recycle()
+        }
     }
 
     // //////////////////////////////////////////////////////////////////
@@ -876,14 +878,17 @@ open class ImageUtils(protected val context: Context) {
 
         // Open up a HTTP connection to the URL.
         val connection: HttpURLConnection = url.openConnection() as HttpURLConnection
-        connection.doInput = true
-        connection.connect()
+        try {
+            connection.doInput = true
+            connection.connect()
 
-        // Download the image from the URL.
-        val input: InputStream = connection.inputStream
-        connection.disconnect()
-
-        return BitmapFactory.decodeStream(input)
+            // Download the image from the URL. Use .use{} to ensure the stream is closed (H2 fix).
+            connection.inputStream.use { input ->
+                return BitmapFactory.decodeStream(input)
+            }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     // //////////////////////////////////////////////////////////////////
@@ -899,7 +904,9 @@ open class ImageUtils(protected val context: Context) {
      * @param region Specify the region consisting of (x, y, width, height) of the source screenshot to template match. Defaults to (0, 0, 0, 0) which is equivalent to searching the full image.
      * @param suppressError Whether or not to suppress saving error messages to the log. Defaults to false.
      * @param testMode Flag to test and get a valid scale for device compatibility.
-     * @return Pair object consisting of the Point object containing the location of the match and the source screenshot. Can be null.
+     * @return Pair object consisting of the Point object containing the location of the match (null if not found) and the source screenshot.
+     *
+     * **Ownership note:** the returned Bitmap is a live reference to the MediaProjectionService screenshot cache (`lastBitmap`), NOT a copy. Callers must NOT call `recycle()` on it, and must finish using it before the next `takeScreenshotNow()` call, which recycles the previous cached bitmap.
      */
     open fun findImage(
         templateName: String,
@@ -922,48 +929,57 @@ open class ImageUtils(protected val context: Context) {
         }
 
         val (sourceBitmap, templateBitmap) = getBitmaps(templateName)
-
-        while (numberOfTries > 0) {
-            if (templateBitmap != null) {
-                val (resultFlag, matchLocation) = match(sourceBitmap, templateBitmap, templateName, region, useSingleScale = true, customConfidence = confidence)
-                if (!resultFlag) {
-                    if (testMode) {
-                        // Increment scale by 0.01 until a match is found if Test Mode is enabled.
-                        customScale += 0.01
-                        customScale = decimalFormat.format(customScale).toDouble()
-                    }
-
-                    numberOfTries -= 1
-                    if (numberOfTries <= 0) {
-                        if (!suppressError) {
-                            MessageLog.w(tag, "Failed to find the ${templateName.uppercase()} image.")
+        try {
+            while (numberOfTries > 0) {
+                if (templateBitmap != null) {
+                    val (resultFlag, matchLocation) = match(sourceBitmap, templateBitmap, templateName, region, useSingleScale = true, customConfidence = confidence)
+                    if (!resultFlag) {
+                        if (testMode) {
+                            // Increment scale by 0.01 until a match is found if Test Mode is enabled.
+                            customScale += 0.01
+                            customScale = decimalFormat.format(customScale).toDouble()
                         }
 
-                        break
+                        numberOfTries -= 1
+                        if (numberOfTries <= 0) {
+                            if (!suppressError) {
+                                MessageLog.w(tag, "Failed to find the ${templateName.uppercase()} image.")
+                            }
+
+                            break
+                        }
+                    } else {
+                        if (testMode) {
+                            // Create a range of scales for user recommendation.
+                            val scale0: Double = decimalFormat.format(customScale).toDouble()
+                            val scale1: Double = decimalFormat.format(scale0 + 0.01).toDouble()
+                            val scale2: Double = decimalFormat.format(scale0 + 0.02).toDouble()
+                            val scale3: Double = decimalFormat.format(scale0 + 0.03).toDouble()
+                            val scale4: Double = decimalFormat.format(scale0 + 0.04).toDouble()
+
+                            MessageLog.i(
+                                tag,
+                                "[SUCCESS] Found the ${templateName.uppercase()} at $matchLocation with scale $scale0.\n\nRecommended to use scale $scale1, $scale2, $scale3 or $scale4.",
+                            )
+                        } else if (debugMode) {
+                            MessageLog.d(tag, "[SUCCESS] Found the ${templateName.uppercase()} at $matchLocation.")
+                        }
+
+                        return Pair(matchLocation, sourceBitmap)
                     }
                 } else {
-                    if (testMode) {
-                        // Create a range of scales for user recommendation.
-                        val scale0: Double = decimalFormat.format(customScale).toDouble()
-                        val scale1: Double = decimalFormat.format(scale0 + 0.01).toDouble()
-                        val scale2: Double = decimalFormat.format(scale0 + 0.02).toDouble()
-                        val scale3: Double = decimalFormat.format(scale0 + 0.03).toDouble()
-                        val scale4: Double = decimalFormat.format(scale0 + 0.04).toDouble()
-
-                        MessageLog.i(
-                            tag,
-                            "[SUCCESS] Found the ${templateName.uppercase()} at $matchLocation with scale $scale0.\n\nRecommended to use scale $scale1, $scale2, $scale3 or $scale4.",
-                        )
-                    } else if (debugMode) {
-                        MessageLog.d(tag, "[SUCCESS] Found the ${templateName.uppercase()} at $matchLocation.")
-                    }
-
-                    return Pair(matchLocation, sourceBitmap)
+                    // 模板图像为 null(assets 缺失/路径错误)时递减计数,避免无限循环
+                    MessageLog.w(tag, "Template bitmap is null for ${templateName.uppercase()}. Cannot find image.")
+                    numberOfTries -= 1
                 }
             }
-        }
 
-        return Pair(null, sourceBitmap)
+            return Pair(null, sourceBitmap)
+        } finally {
+            // Release the template Bitmap decoded from assets (C4 fix).
+            // Do NOT recycle sourceBitmap — it is a cache reference from MediaProjectionService.
+            templateBitmap?.recycle()
+        }
     }
 
     /**
@@ -972,7 +988,7 @@ open class ImageUtils(protected val context: Context) {
      * @param templateName File name of the template image.
      * @param region Specify the region consisting of (x, y, width, height) of the source screenshot to template match. Defaults to (0, 0, 0, 0) which is equivalent to searching the full image.
      * @param confidence Accuracy threshold for matching. Defaults to 0.0 which will use the confidence set in the app's settings.
-     * @return An ArrayList of Point objects containing all the occurrences of the specified image or null if not found.
+     * @return An ArrayList of Point objects containing all the occurrences of the specified image. Empty if none found.
      */
     open fun findAll(templateName: String, region: IntArray = intArrayOf(0, 0, 0, 0), confidence: Double = 0.0): ArrayList<Point> {
         if (debugMode) {
@@ -980,24 +996,28 @@ open class ImageUtils(protected val context: Context) {
         }
 
         val (sourceBitmap, templateBitmap) = getBitmaps(templateName)
+        try {
+            if (templateBitmap != null) {
+                val matchLocations = matchAll(sourceBitmap, templateBitmap, region = region, customConfidence = confidence)
 
-        if (templateBitmap != null) {
-            val matchLocations = matchAll(sourceBitmap, templateBitmap, region = region, customConfidence = confidence)
+                // Sort the match locations by ascending x and y coordinates.
+                matchLocations.sortBy { it.x }
+                matchLocations.sortBy { it.y }
 
-            // Sort the match locations by ascending x and y coordinates.
-            matchLocations.sortBy { it.x }
-            matchLocations.sortBy { it.y }
+                if (debugMode) {
+                    MessageLog.d(tag, "Found match locations for $templateName: $matchLocations.")
+                } else {
+                    Log.d(tag, "Found match locations for $templateName: $matchLocations.")
+                }
 
-            if (debugMode) {
-                MessageLog.d(tag, "Found match locations for $templateName: $matchLocations.")
-            } else {
-                Log.d(tag, "Found match locations for $templateName: $matchLocations.")
+                return matchLocations
             }
 
-            return matchLocations
+            return arrayListOf()
+        } finally {
+            // Release the template Bitmap decoded from assets (C4 fix).
+            templateBitmap?.recycle()
         }
-
-        return arrayListOf()
     }
 
     /**
@@ -1115,101 +1135,24 @@ open class ImageUtils(protected val context: Context) {
 
     // //////////////////////////////////////////////////////////////////
     // //////////////////////////////////////////////////////////////////
-    // OCR with Tesseract and Google ML Kit
-
-    /**
-     * Checks for Tesseract initialization and if it was not, initialize it.
-     *
-     * @param traineddataFileName The file name including its extension for the .traineddata of Tesseract.
-     * @return True if both Tesseract client objects were initialized.
-     */
-    protected fun checkTesseractInitialization(traineddataFileName: String): Boolean {
-        return if (!this::tessBaseAPI.isInitialized || !this::tessDigitsBaseAPI.isInitialized) {
-            MessageLog.w(tag, "Check failed for Tesseract initialization. Starting process to initialize Tesseract now...")
-            initTesseract(traineddataFileName)
-        } else {
-            true
-        }
-    }
-
-    /**
-     * Initialize Tesseract for future OCR operations. Make sure to put your .traineddata inside the root of the /assets/ folder.
-     *
-     * @param traineddataFileName The file name including its extension for the .traineddata of Tesseract.
-     * @return True if both Tesseract client objects were initialized.
-     */
-    protected fun initTesseract(traineddataFileName: String): Boolean {
-        tessBaseAPI = TessBaseAPI()
-        tessDigitsBaseAPI = TessBaseAPI()
-
-        val fileName =
-            if (!traineddataFileName.contains(".traineddata")) {
-                MessageLog.d(tag, "[TESSERACT] Developer did not include the correct extension when initializing Tesseract so appending it for them.")
-                "$traineddataFileName.traineddata"
-            } else {
-                traineddataFileName
-            }
-
-        val tempDirectory: String = context.filesDir.absolutePath + "/tesseract/tessdata/"
-        val newTempDirectory = File(tempDirectory)
-
-        if (!newTempDirectory.exists()) {
-            val successfullyCreated: Boolean = newTempDirectory.mkdirs()
-            if (!successfullyCreated) {
-                MessageLog.e(tag, "Failed to create the internal tesseract/tessdata/ folder.")
-            } else {
-                MessageLog.d(tag, "[TESSERACT] Successfully created internal tesseract/tessdata/ folder.")
-            }
-        } else {
-            MessageLog.d(tag, "[TESSERACT] Internal tesseract/tessdata/ folder already exists.")
-        }
-
-        // If the .traineddata is not in the application folder, copy it there from assets.
-        val trainedDataPath = File(tempDirectory, fileName)
-        if (!trainedDataPath.exists()) {
-            try {
-                MessageLog.d(tag, "[TESSERACT] Starting Tesseract initialization.")
-                val input = context.assets.open(fileName)
-
-                val output = FileOutputStream("$tempDirectory/$fileName")
-                Log.d(tag, "Moving $fileName to $tempDirectory/$fileName for Tesseract initialization.")
-
-                val buffer = ByteArray(1024)
-                var read: Int
-                while (input.read(buffer).also { read = it } != -1) {
-                    output.write(buffer, 0, read)
-                }
-
-                input.close()
-                output.flush()
-                output.close()
-
-                MessageLog.d(tag, "[TESSERACT] Finished Tesseract initialization.")
-            } catch (e: IOException) {
-                MessageLog.e(tag, "Tesseract I/O Exception: ${e.stackTraceToString()}")
-            }
-        }
-
-        tessBaseAPI.init(context.filesDir.absolutePath + "/tesseract/", "eng")
-        tessDigitsBaseAPI.init(context.filesDir.absolutePath + "/tesseract/", "eng")
-
-        tessDigitsBaseAPI.setVariable(TessBaseAPI.VAR_CHAR_BLACKLIST, "!?@#$%&*()<>_-+=/:;'\\\"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
-        tessDigitsBaseAPI.setVariable(TessBaseAPI.VAR_CHAR_WHITELIST, "0123456789")
-        tessDigitsBaseAPI.setVariable("classify_bln_numeric_mode", "1")
-
-        // Set the Page Segmentation Mode to '--psm 7' or "Treat the image as a single text line" according to https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html#page-segmentation-method
-        tessBaseAPI.pageSegMode = TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK
-        tessDigitsBaseAPI.pageSegMode = TessBaseAPI.PageSegMode.PSM_SINGLE_LINE
-
-        return this::tessBaseAPI.isInitialized && this::tessDigitsBaseAPI.isInitialized
-    }
+    // OCR with ONNX Runtime + PP-OCRv6
 
     /**
      * Perform OCR text detection along with some image manipulation via thresholding to make the cropped screenshot black and white using OpenCV.
      *
+     * NOTE: As of v2.5.8, the underlying engine has been migrated from Tesseract + Google ML Kit to
+     * ONNX Runtime running PP-OCRv6 Tiny. PP-OCRv6 is trained on RGB images and performs its own
+     * internal normalization, so grayscale/thresh are now DISABLED by default. Enabling them will
+     * route through OpenCV (slow path) and may hurt accuracy. They remain as parameters for legacy
+     * callers that explicitly want binary preprocessing. `detectDigitsOnly` is implemented as a
+     * post-recognition regex filter.
+     *
+     * Fast path (default): grayscale=false && thresh=false && scale=1.0 → no OpenCV at all,
+     * croppedBitmap is fed directly to the OCR engine.
+     *
      * @param cropRegion The region consisting of (x, y, width, height) of the cropped region.
-     * @param grayscale Performs grayscale conversion on the cropped region. Defaults to true.
-     * @param thresh Performs thresholding on the cropped region. Defaults to true.
+     * @param grayscale Performs grayscale conversion on the cropped region. Defaults to false (PP-OCRv6 wants RGB).
+     * @param thresh Performs thresholding on the cropped region. Defaults to false.
      * @param threshold Minimum threshold value. Defaults to 130.
      * @param thresholdMax Maximum threshold value. Defaults to 255.
      * @param scale Scale factor to apply to the processed image. Values > 1 scale up, values < 1 scale down. Clamped to >= 0. Defaults to 1.0.
@@ -1221,8 +1164,8 @@ open class ImageUtils(protected val context: Context) {
      */
     open fun findText(
         cropRegion: IntArray,
-        grayscale: Boolean = true,
-        thresh: Boolean = true,
+        grayscale: Boolean = false,
+        thresh: Boolean = false,
         threshold: Double = 130.0,
         thresholdMax: Double = 255.0,
         scale: Double = 1.0,
@@ -1231,158 +1174,269 @@ open class ImageUtils(protected val context: Context) {
         debugName: String = "ocr",
     ): String {
         val startTime: Long = System.currentTimeMillis()
-        var result = ""
+
+        // Abort early if the bot has been stopped; avoids wasted OCR work after interrupt.
+        if (!BotService.isRunning) {
+            MessageLog.w(tag, "[TEXT_DETECTION] Bot no longer running; abort findText($debugName).")
+            return ""
+        }
 
         val finalSourceBitmap: Bitmap = sourceBitmap ?: getSourceBitmap()
 
-        if (debugMode) Log.d(tag, "\n[TEXT_DETECTION] Starting text detection now...")
+        MessageLog.d(tag, "[TEXT_DETECTION] Starting text detection for '$debugName'...")
 
-        // Crop and convert the source bitmap to Mat.
-        // Google ML Kit requires a minimum of 32x32 pixels, so clamp the dimensions.
+        // Crop the source bitmap. PP-OCRv6 expects RGB input; clamp dimensions to a minimum.
         val (x, y, width, height) = cropRegion
-        val minDimension = 32
+        val minDimension = 16
         val clampedWidth = maxOf(width, minDimension).coerceAtMost(finalSourceBitmap.width - x)
         val clampedHeight = maxOf(height, minDimension).coerceAtMost(finalSourceBitmap.height - y)
 
-        // Log if the dimensions were clamped to meet the minimum requirement.
         if (width < minDimension || height < minDimension) {
-            Log.w(tag, "[TEXT_DETECTION] Crop region clamped from ${width}x$height to ${clampedWidth}x$clampedHeight to meet ML Kit's minimum 32x32 requirement.")
+            MessageLog.w(tag, "[TEXT_DETECTION] Crop region clamped from ${width}x$height to ${clampedWidth}x$clampedHeight to meet the minimum $minDimension px requirement.")
         }
 
         val croppedBitmap = Bitmap.createBitmap(finalSourceBitmap, x, y, clampedWidth, clampedHeight)
-        val cvImage = Mat()
-        Utils.bitmapToMat(croppedBitmap, cvImage)
 
-        // Save the cropped image before converting it to black and white in order to troubleshoot issues related to differing device sizes and cropping.
-        if (debugMode) {
-            Imgcodecs.imwrite("$matchFilePath/debug_${debugName}_cropped.png", cvImage)
-        }
-
-        // Grayscale the cropped image.
-        val grayImage = Mat()
-        val imageForProcessing: Mat =
-            if (grayscale) {
-                Imgproc.cvtColor(cvImage, grayImage, Imgproc.COLOR_RGB2GRAY)
-                grayImage
-            } else {
-                cvImage
-            }
-
-        // Thresh the grayscale cropped image to make black and white.
-        val processedMat: Mat =
-            if (thresh) {
-                val bwImage = Mat()
-                Imgproc.threshold(imageForProcessing, bwImage, threshold, thresholdMax, Imgproc.THRESH_BINARY)
-
-                // Save the cropped image before converting it to black and white in order to troubleshoot issues related to differing device sizes and cropping.
-                if (debugMode) {
-                    Imgcodecs.imwrite("$matchFilePath/debug_${debugName}_threshold.png", bwImage)
-                }
-                bwImage
-            } else {
-                imageForProcessing
-            }
-
-        // Convert the processed Mat to Bitmap and apply scaling if needed.
-        val clampedScale = max(0.0, scale)
-        val baseBitmap = createBitmap(processedMat.cols(), processedMat.rows())
-        Utils.matToBitmap(processedMat, baseBitmap)
-        val finalBitmap =
-            if (clampedScale != 1.0) {
-                baseBitmap.scale((baseBitmap.width * clampedScale).toInt(), (baseBitmap.height * clampedScale).toInt())
-            } else {
-                baseBitmap
-            }
-
-        // Create a InputImage object for Google's ML OCR.
-        val inputImage: InputImage = InputImage.fromBitmap(finalBitmap, 0)
-
-        // Use CountDownLatch to make the async operation synchronous.
-        val latch = CountDownLatch(1)
-        var mlKitFailed = false
-        var errorMessage = "Google ML Kit failed to do text detection."
-
-        googleTextRecognizer.process(inputImage)
-            .addOnSuccessListener { text ->
-                if (text.textBlocks.isNotEmpty()) {
-                    for (block in text.textBlocks) {
-                        result = block.text
-                    }
-                }
-                latch.countDown()
-            }
-            .addOnFailureListener { exception ->
-                // Check if it's an MlKitException and extract error code information.
-                if (exception is MlKitException) {
-                    val errorCode = exception.errorCode
-                    errorMessage += " Error code: $errorCode."
-                }
-				
-                // Include the exception message if available.
-                exception.message?.let {
-                    errorMessage += " Exception message: $it"
-                }
-				
-                mlKitFailed = true
-                latch.countDown()
-            }
-
-        // Wait for the async operation to complete.
         try {
-            latch.await(5, TimeUnit.SECONDS)
-        } catch (_: InterruptedException) {
-            Log.e(tag, "Google ML Kit operation timed out.")
-        }
-
-        // Fallback to Tesseract if ML Kit failed or didn't find result.
-        if (mlKitFailed || result == "") {
-            Log.e(tag, errorMessage)
-
-            // The Tesseract API instances are not thread-safe, so serialize all access to them with a single lock covering both instances.
-            // Concurrent OCR calls (e.g. reading several stats in parallel) can otherwise corrupt Tesseract state and crash the process with a native SIGABRT.
-            synchronized(tesseractLock) {
-                // Use either the default Tesseract client or the Tesseract client geared towards digits to set the image to scan.
-                if (detectDigitsOnly) {
-                    Log.d(tag, "[TEXT_DETECTION] Setting Tesseract image for digits only.")
-                    tessDigitsBaseAPI.setImage(finalBitmap)
-                } else {
-                    Log.d(tag, "[TEXT_DETECTION] Setting Tesseract image for text detection.")
-                    tessBaseAPI.setImage(finalBitmap)
-                }
-
+            // Debug: save the cropped RGB image for troubleshooting.
+            if (debugMode) {
+                val cvImage = Mat()
                 try {
-                    // Finally, detect text on the cropped region.
-                    result =
-                        if (detectDigitsOnly) {
-                            tessDigitsBaseAPI.utF8Text
-                        } else {
-                            tessBaseAPI.utF8Text
-                        }
-                    Log.d(tag, "[TEXT_DETECTION] Detected text with Tesseract: $result")
-                } catch (e: Exception) {
-                    Log.e(tag, "Cannot perform OCR: ${e.stackTraceToString()}")
+                    Utils.bitmapToMat(croppedBitmap, cvImage)
+                    Imgcodecs.imwrite("$matchFilePath/debug_${debugName}_cropped.png", cvImage)
+                } finally {
+                    cvImage.release()
                 }
-
-                // Stop Tesseract operations.
-                if (detectDigitsOnly) {
-                    tessDigitsBaseAPI.stop()
-                } else {
-                    tessBaseAPI.stop()
-                }
-
-                tessBaseAPI.clear()
-                tessDigitsBaseAPI.clear()
             }
-        } else {
-            Log.d(tag, "[TEXT_DETECTION] Detected text with Google ML Kit: $result")
+
+            val clampedScale = max(0.0, scale)
+
+            // Produce the final bitmap to feed into the OCR engine.
+            // Fast path: skip OpenCV entirely when no grayscale/thresh is requested.
+            val needRecycleFinal: Boolean
+            val finalBitmap: Bitmap = if (!grayscale && !thresh) {
+                if (clampedScale == 1.0) {
+                    // finalBitmap aliases croppedBitmap; croppedBitmap.recycle() in the outer finally handles cleanup.
+                    needRecycleFinal = false
+                    croppedBitmap
+                } else {
+                    needRecycleFinal = true
+                    Bitmap.createScaledBitmap(
+                        croppedBitmap,
+                        (croppedBitmap.width * clampedScale).toInt(),
+                        (croppedBitmap.height * clampedScale).toInt(),
+                        true,
+                    )
+                }
+            } else {
+                // Slow path: legacy OpenCV preprocessing (grayscale and/or threshold).
+                // NOTE: applying grayscale/thresh on RGB input will lose color information and may
+                // hurt PP-OCRv6 accuracy. Only enable when you know what you're doing.
+                val cvImage = Mat()
+                val grayImage = Mat()
+                var bwImage: Mat? = null
+                try {
+                    Utils.bitmapToMat(croppedBitmap, cvImage)
+
+                    val imageForProcessing: Mat =
+                        if (grayscale) {
+                            Imgproc.cvtColor(cvImage, grayImage, Imgproc.COLOR_RGB2GRAY)
+                            grayImage
+                        } else {
+                            cvImage
+                        }
+
+                    val processedMat: Mat =
+                        if (thresh) {
+                            bwImage = Mat()
+                            Imgproc.threshold(imageForProcessing, bwImage, threshold, thresholdMax, Imgproc.THRESH_BINARY)
+                            if (debugMode) {
+                                Imgcodecs.imwrite("$matchFilePath/debug_${debugName}_threshold.png", bwImage)
+                            }
+                            bwImage
+                        } else {
+                            imageForProcessing
+                        }
+
+                    val baseBitmap = createBitmap(processedMat.cols(), processedMat.rows())
+                    Utils.matToBitmap(processedMat, baseBitmap)
+
+                    if (clampedScale == 1.0) {
+                        needRecycleFinal = true
+                        baseBitmap
+                    } else {
+                        val scaled = baseBitmap.scale((baseBitmap.width * clampedScale).toInt(), (baseBitmap.height * clampedScale).toInt())
+                        baseBitmap.recycle()
+                        needRecycleFinal = true
+                        scaled
+                    }
+                } finally {
+                    cvImage.release()
+                    grayImage.release()
+                    bwImage?.release()
+                }
+            }
+
+            // Run PP-OCRv6 recognition via the shared ONNX Runtime engine (returns text + CTC confidence).
+            val minConf = SharedData.ocrMinConfidence
+            val (rawText, conf) = try {
+                ocrEngine.recognizeWithConfidence(finalBitmap)
+            } catch (e: Exception) {
+                MessageLog.e(tag, "[TEXT_DETECTION] OCR engine failed: ${e.stackTraceToString()}")
+                Pair("", 0f)
+            }
+
+            // Recycle the final bitmap if it was newly created (not aliased to croppedBitmap).
+            if (needRecycleFinal) finalBitmap.recycle()
+
+            // Drop low-confidence reads when minConfidence is configured (> 0). Empty results are kept
+            // as "" so callers can distinguish "not found" from "filtered out".
+            val confidenceFiltered: String = if (minConf > 0f && conf < minConf && rawText.isNotEmpty()) {
+                MessageLog.d(tag, "[TEXT_DETECTION] Dropping low-confidence read '$rawText' (conf=$conf < minConf=$minConf).")
+                ""
+            } else {
+                rawText
+            }
+
+            // Apply digit-only post-filter when requested (replaces the old digits-only Tesseract model).
+            val result: String = if (detectDigitsOnly) {
+                val filtered = confidenceFiltered.filter { it.isDigit() }
+                if (filtered.isNotEmpty() && filtered != confidenceFiltered) {
+                    MessageLog.d(tag, "[TEXT_DETECTION] detectDigitsOnly filtered '$confidenceFiltered' -> '$filtered'")
+                }
+                filtered
+            } else {
+                confidenceFiltered
+            }
+
+            MessageLog.d(tag, "[TEXT_DETECTION] Detected text with PP-OCRv6: '$result' (conf=$conf) in ${System.currentTimeMillis() - startTime}ms.")
+
+            return result
+        } finally {
+            // Recycle the cropped Bitmap (C2 fix). In the fast path with scale==1.0,
+            // finalBitmap aliased croppedBitmap and needRecycleFinal was false, so it wasn't recycled
+            // above — recycle it here. In all other paths, croppedBitmap is a separate Bitmap recycled here.
+            croppedBitmap.recycle()
+        }
+    }
+
+    // //////////////////////////////////////////////////////////////////
+    // //////////////////////////////////////////////////////////////////
+    // OCR batch + detection APIs (PP-OCRv6 det + rec)
+
+    /**
+     * Recognize text in multiple cropped regions in one batch (shares a single session.run).
+     *
+     * Useful for reading multiple UI values at once (HP/MP/coins etc). Compared to looping [findText],
+     * this reduces N-1 native calls and session context switches. Each region is cropped
+     * independently with no grayscale/thresh preprocessing (PP-OCRv6 is trained on RGB; binarization
+     * would hurt accuracy).
+     *
+     * @param cropRegions Multiple crop regions, each as [x, y, w, h].
+     * @param sourceBitmap Shared source screenshot; null auto-calls [getSourceBitmap].
+     * @return Recognized text per region, in the same order as the input. Empty region or failure returns "".
+     */
+    open fun findTextBatch(
+        cropRegions: List<IntArray>,
+        sourceBitmap: Bitmap? = null,
+    ): List<String> {
+        val startTime = System.currentTimeMillis()
+        if (cropRegions.isEmpty()) return emptyList()
+
+        // Abort early if the bot has been stopped; avoids wasted OCR work after interrupt.
+        if (!BotService.isRunning) {
+            MessageLog.w(tag, "[TEXT_BATCH] Bot no longer running; abort findTextBatch.")
+            return emptyList()
         }
 
-        if (debugMode) Log.d(tag, "[TEXT_DETECTION] Text detection finished in ${System.currentTimeMillis() - startTime}ms.")
+        MessageLog.d(tag, "[TEXT_BATCH] Starting batch text detection for ${cropRegions.size} region(s)...")
 
-        cvImage.release()
-        grayImage.release()
-        processedMat.release()
+        val src = sourceBitmap ?: getSourceBitmap()
+        val minDimension = 16
 
-        return result
+        // 1. Crop each region with bounds + minimum-size protection.
+        val crops = ArrayList<Bitmap>(cropRegions.size)
+        try {
+            for (region in cropRegions) {
+                val x = region.getOrElse(0) { 0 }.coerceIn(0, src.width - 1)
+                val y = region.getOrElse(1) { 0 }.coerceIn(0, src.height - 1)
+                val w = maxOf(region.getOrElse(2) { 0 }, minDimension).coerceAtMost(src.width - x)
+                val h = maxOf(region.getOrElse(3) { 0 }, minDimension).coerceAtMost(src.height - y)
+                if (w < 1 || h < 1) {
+                    MessageLog.w(tag, "[TEXT_BATCH] Skip invalid region $region")
+                    continue
+                }
+                crops.add(Bitmap.createBitmap(src, x, y, w, h))
+            }
+            if (crops.isEmpty()) return emptyList()
+
+            // 2. Batch recognition with confidence.
+            val minConf = SharedData.ocrMinConfidence
+            val results = ocrEngine.recognizeBatchWithConfidence(crops)
+            val dropped = if (minConf > 0f) {
+                results.count { it.first.isNotEmpty() && it.second < minConf }
+            } else 0
+            val texts = results.map { (text, conf) ->
+                if (minConf > 0f && conf < minConf && text.isNotEmpty()) "" else text
+            }
+            MessageLog.d(tag, "[TEXT_BATCH] Recognized ${crops.size} regions in ${System.currentTimeMillis() - startTime}ms" +
+                (if (minConf > 0f) "; dropped $dropped low-confidence (< $minConf) reads" else "") + ".")
+            return texts
+        } finally {
+            crops.forEach { it.recycle() }
+        }
+    }
+
+    /**
+     * Detect all text lines in the full image and return each line's content + position.
+     *
+     * Internally runs the end-to-end det (detect text-line boxes) + batch rec (recognize per line)
+     * pipeline. Useful for "find a UI element by its text". Results are sorted top→bottom, left→right.
+     *
+     * @param sourceBitmap Source screenshot; null auto-calls [getSourceBitmap].
+     * @param textFilter Optional; only return results containing this substring (case-insensitive). null returns all.
+     * @return List of matching [OcrResult].
+     */
+    open fun findTextLocations(
+        sourceBitmap: Bitmap? = null,
+        textFilter: String? = null,
+    ): List<OcrResult> {
+        val startTime = System.currentTimeMillis()
+
+        // Abort early if the bot has been stopped; avoids wasted OCR work after interrupt.
+        if (!BotService.isRunning) {
+            MessageLog.w(tag, "[TEXT_LOCATIONS] Bot no longer running; abort findTextLocations.")
+            return emptyList()
+        }
+
+        MessageLog.d(tag, "[TEXT_LOCATIONS] Starting det+rec for filter='$textFilter'...")
+
+        val src = sourceBitmap ?: getSourceBitmap()
+
+        val all = ocrEngine.detectAndRecognize(src, textOnly = textFilter == null)
+        val filtered = if (textFilter.isNullOrEmpty()) all
+            else all.filter { it.text.contains(textFilter, ignoreCase = true) }
+
+        MessageLog.d(tag, "[TEXT_LOCATIONS] Detected ${all.size} lines, ${filtered.size} matched filter '$textFilter' in ${System.currentTimeMillis() - startTime}ms.")
+        return filtered
+    }
+
+    /**
+     * Find the first position containing the specified text and return its center point (for tapping).
+     *
+     * Convenience wrapper around [findTextLocations], similar to [findImage] but for text. Useful for
+     * "tap the button containing some text".
+     *
+     * @param text Text to find (case-insensitive).
+     * @param sourceBitmap Source screenshot; null auto-calls [getSourceBitmap].
+     * @return Center [PointF] of the matching line; null if not found.
+     */
+    open fun findTextLocation(
+        text: String,
+        sourceBitmap: Bitmap? = null,
+    ): PointF? {
+        if (text.isEmpty()) return null
+        val matches = findTextLocations(sourceBitmap, text)
+        return matches.firstOrNull()?.center
     }
 }

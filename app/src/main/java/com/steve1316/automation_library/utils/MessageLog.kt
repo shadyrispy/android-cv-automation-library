@@ -276,6 +276,9 @@ class MessageLog {
 
             prefix += "[${level.name}]"
 
+            // Build the final message string BEFORE acquiring the lock. String concat does not
+            // touch shared mutable state, so holding the lock during this work is wasteful and
+            // serializes concurrent loggers (L5 fix).
             val msg =
                 if (message.startsWith("\n")) {
                     "\n$prefix " + message.removePrefix("\n")

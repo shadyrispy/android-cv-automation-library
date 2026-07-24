@@ -62,5 +62,24 @@ class SharedData {
                 val scale = SettingsHelper.getFloatSetting("debug", "recordingResolutionScale", 1.0f)
                 return scale.coerceIn(0.25f, 1.0f)
             }
+
+        // OCR engine configuration (PP-OCRv6 det + rec tunable parameters).
+        val ocrDetLimitMaxLen: Int
+            get() = SettingsHelper.getIntSetting("ocr", "detLimitMaxLen", 736)
+
+        val ocrDetThresh: Float
+            get() = SettingsHelper.getFloatSetting("ocr", "detThresh", 0.2f)
+
+        val ocrDetBoxThreshold: Float
+            get() = SettingsHelper.getFloatSetting("ocr", "detBoxThreshold", 0.4f)
+
+        val ocrDetUnclipRatio: Float
+            get() = SettingsHelper.getFloatSetting("ocr", "detUnclipRatio", 1.4f)
+
+        val ocrRecMaxWidth: Int
+            get() = SettingsHelper.getIntSetting("ocr", "recMaxWidth", 640)
+
+        val ocrMinConfidence: Float
+            get() = SettingsHelper.getFloatSetting("ocr", "minConfidence", 0.0f)
     }
 }

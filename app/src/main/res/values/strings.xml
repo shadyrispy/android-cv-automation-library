@@ -14,4 +14,30 @@
     Button.</string>
 
     <string name="go_to_settings">Go to Settings</string>
+
+    <!-- ===== Permission Guide UI ===== -->
+    <string name="permission_guide_title">Permission Setup</string>
+    <string name="permission_guide_progress">Step %1$d of %2$d completed</string>
+
+    <string name="permission_step_overlay_title">Overlay Permission</string>
+    <string name="permission_step_overlay_desc">Required to display the floating start/stop button</string>
+
+    <string name="permission_step_accessibility_title">Accessibility Service</string>
+    <string name="permission_step_accessibility_desc">Required to perform tap and swipe gestures</string>
+
+    <string name="permission_step_projection_title">Screen Capture</string>
+    <string name="permission_step_projection_desc">Required to take screenshots for image matching</string>
+
+    <string name="permission_action_grant">Grant</string>
+    <string name="permission_action_start">Start Using</string>
+    <string name="permission_action_retry">Retry</string>
+
+    <string name="permission_status_granted">Granted</string>
+    <string name="permission_status_denied">Not granted</string>
+    <string name="permission_status_requesting">Waiting…</string>
+
+    <string name="permission_exit_confirm_title">Permissions Incomplete</string>
+    <string name="permission_exit_confirm_message">Some permissions are not yet granted. The automation library may not function correctly. Are you sure you want to exit?</string>
+    <string name="permission_exit_confirm_yes">Exit</string>
+    <string name="permission_exit_confirm_no">Stay</string>
 </resources>

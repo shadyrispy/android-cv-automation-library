@@ -145,16 +145,13 @@ class SQLiteSettingsManager(private val context: Context) :
                     null,
                 )
 
-            val result: String? =
-                if (cursor?.moveToFirst() == true) {
-                    cursor.getString(0)
-                } else {
+            // Use .use{} to ensure the cursor is closed on all paths (H7 fix).
+            return cursor?.use {
+                if (it.moveToFirst()) it.getString(0) else {
                     Log.e(TAG, "Setting not found: $category.$key")
                     null
                 }
-
-            cursor?.close()
-            return result
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error loading setting $category.$key: ${e.message}", e)
             return null
