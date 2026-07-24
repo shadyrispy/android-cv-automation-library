@@ -26,6 +26,10 @@ appUpdater = "2.7"
 twitter4jCore = "4.1.2"
 ktlint = "14.2.0"
 onnxRuntime = "1.20.0"
+kotlinxSerializationJson = "1.6.3"
+kotlinxCoroutines = "1.8.0"
+junit = "4.13.2"
+robolectric = "4.12.2"
 
 [libraries]
 androidGradleBuildTools = { group = "com.android.tools.build", name = "gradle", version.ref = "androidGradleBuildTools" }
@@ -43,6 +47,11 @@ appUpdater = { group = "com.github.javiersantos", name = "AppUpdater", version.r
 opencv-android-sdk = { module = "com.github.steve1316:opencv-android-sdk", version.ref = "opencvAndroidSdk" }
 twitter4j-core = { module = "org.twitter4j:twitter4j-core", version.ref = "twitter4jCore" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxRuntime" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 [bundles]
 androidApp = ["androidx-core", "androidx-preference", "androidx-documentfile"]
@@ -50,3 +59,4 @@ androidApp = ["androidx-core", "androidx-preference", "androidx-documentfile"]
 [plugins]
 foojayJDKResolver = { id = "org.gradle.toolchains.foojay-resolver-convention", version = "1.0.0" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinGradlePlugin" }

@@ -1,4 +1,5 @@
 include(":app")
+include(":workflow")
 rootProject.name = "Automation Library"
 
 // Centralized repository management - configures all dependency sources upfront
