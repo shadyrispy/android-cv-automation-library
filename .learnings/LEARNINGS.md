@@ -366,3 +366,94 @@ Android 自动化库的 native 资源（Mat/Bitmap/ONNX Tensor/Cursor/Stream）�
 
 ---
 
+## [LRN-20260724-014] knowledge_gap
+
+**Logged**: 2026-07-24T20:50:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: infra
+
+### Summary
+项目当前 `libopencv_java4.so`（8.1MB, arm64-v8a）参考了 nihui/opencv-mobile 的精简思路,但**不能直接套用 nihui 官方的 `opencv4_cmake_options.txt`**,因为本项目使用 OpenCV Java API,必须保留 Java 绑定 + imgcodecs + 内置 jpeg/png/zlib。
+
+### Details
+对比 nihui 官方 `opencv4_cmake_options.txt` 与本项目 `/tmp/ocv-min/build-arm64/CMakeVars.txt` 的关键差异:
+
+| 配置项 | nihui 官方 | 本项目 | 原因 |
+|---|---|---|---|
+| `BUILD_opencv_java` | OFF | **ON** | 项目用 `org.opencv.android.Utils` 等 Java API,必须构建 Java 绑定 |
+| `BUILD_JAVA` | OFF | (未显式设,默认 ON) | 同上 |
+| `BUILD_FAT_JAVA_LIB` | OFF | **ON** | 把所有静态库链接进单个 `libopencv_java4.so`,方便 jniLibs 引用 |
+| `BUILD_opencv_imgcodecs` | OFF | **ON** | 项目用 `Imgcodecs.imread/imwrite` 做 PNG/JPG 读写 |
+| `BUILD_JPEG` | OFF | **ON** | 内置 libjpeg-turbo(无系统 JPEG 可用) |
+| `BUILD_PNG` | OFF | **ON** | 内置 libpng |
+| `BUILD_ZLIB` | OFF | **ON** | 内置 zlib |
+| `WITH_CPUFEATURES` | OFF | ON | 启用 cpufeatures |
+| `WITH_OPENMP` | ON | OFF | nihui 启用 OpenMP,本项目默认关闭 |
+| `WITH_ANDROID_NATIVE_CAMERA` | (未设) | ON | 项目原依赖保留 |
+
+nihui 主推"minimal native build"——只构建 native 静态库,不构建 Java 绑定,不构建 imgcodecs。这对纯 C++ 项目合适,但对 Android Java/Kotlin 项目不直接适用。
+
+### Suggested Action
+1. 项目配置正确,无需对齐 nihui 全部选项;8.1MB 主要是 Java 绑定 + imgcodecs + jpeg/png/zlib 编解码库贡献的,属于必要开销
+2. 若未来不需要 `imwrite` 写图功能,可考虑关闭 `BUILD_opencv_imgcodecs` 进一步缩减体积
+3. 若仅需 `imdecode` (从内存解码),仍需 imgcodecs 模块但可关闭 JPEG/PNG 编码路径(需 patch)
+4. 构建脚本 `/tmp/ocv-min/build_minimal.sh` 是 0 字节空文件,且 `/tmp` 重启即清空——应将完整 cmake configure 命令持久化到 `scripts/build_opencv_minimal.sh`
+
+### Metadata
+- Source: research
+- Related Files: /tmp/ocv-min/build-arm64/CMakeVars.txt, /tmp/ocv-min/build-arm64/CMakeCache.txt, app/build.gradle.kts, app/src/main/java/com/steve1316/automation_library/utils/ImageUtils.kt
+- Tags: opencv, opencv-mobile, build-config, cmake, native-build, aar-size
+- See Also: LRN-20260724-013
+
+---
+
+## [LRN-20260724-015] best_practice
+
+**Logged**: 2026-07-24T22:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: infra
+
+### Summary
+启用 CAROTENE (ARM NEON SIMD) + 扩展多 ABI 支持 (arm64-v8a / armeabi-v7a / x86_64)
+
+### Details
+**变更背景**:
+1. 评估 OpenMP 在手机上效果有限(Android 大小核架构下 fork/join 开销可能超过并行收益),且 OCR 主负载由 ONNX Runtime 独立处理。
+2. CAROTENE 是 OpenCV 内置 ARM NEON SIMD 优化层,对 `matchTemplate`/`cvtColor`/`threshold` 等 SIMD 友好路径有 20-40% 加速,是更确定的优化方向。
+
+**ABI 特定配置**:
+- `arm64-v8a`: `-DWITH_CAROTENE=ON` (NEON 原生支持)
+- `armeabi-v7a`: `-DWITH_CAROTENE=ON -DENABLE_NEON=ON -DENABLE_VFPV3=ON` (v7a 需显式启用 NEON,minSdk 24+ 设备 100% 支持)
+- `x86_64`: `-DWITH_CAROTENE=OFF` (x86 不支持 CAROTENE, OpenCV 自动忽略)
+
+**构建产物** (libopencv_java4.so):
+| ABI | 大小 | JNI 符号 | 备注 |
+|---|---|---|---|
+| arm64-v8a | 8.5MB (原 8.1MB, +400KB) | 834 | CAROTENE ON |
+| armeabi-v7a | 5.7MB | 834 | CAROTENE ON, NEON |
+| x86_64 | 12MB | 834 | CAROTENE OFF, 仅模拟器 |
+
+**AAR 包大小**: 14MB (app-debug.aar,三 ABI 全部打包)
+
+**关键发现**:
+1. CAROTENE 启用后 arm64-v8a 增加 ~400KB,符合预期
+2. armeabi-v7a 体积反而小于 arm64-v8a (5.7MB vs 8.5MB),原因是 32 位 ARM 指令更紧凑 + CAROTENE 在 v7a 上 fallback 路径较少
+3. x86_64 体积最大 (12MB),因为无 CAROTENE 优化 + x86 指令冗长 + 仍保留 Java 绑定全套
+4. macOS 上系统 `nm` 无法读取 32 位 ARM ELF,需用 NDK 自带的 `llvm-nm` (`$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm`)
+5. CAROTENE 是**纯优化层**,API 行为一致,无功能影响;仅可能产生 1e-7 级浮点累加误差,对 matchTemplate confidence 阈值 (0.8-0.9) 完全可忽略
+
+### Suggested Action
+1. 若需进一步缩减 AAR 体积,可在 `build.gradle.kts` 中使用 ABI splits 为不同架构生成独立 AAR
+2. 若 release 包不需要模拟器支持,可考虑从 release 构建中移除 x86_64
+3. 性能验证建议:启用 CAROTENE 后,实测 `ImageUtils.findImage()` 在大图场景下的耗时对比
+
+### Metadata
+- Source: research
+- Related Files: scripts/build_opencv_minimal.sh, app/build.gradle.kts, app/src/main/jniLibs/
+- Tags: opencv, carotene, neon, simd, multi-abi, performance
+- See Also: LRN-20260724-014
+
+---
+

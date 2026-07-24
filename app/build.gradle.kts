@@ -30,9 +30,12 @@ android {
         buildConfigField("String", "VERSION_NAME", "\"${libs.versions.app.versionName.get()}\"")
         consumerProguardFiles("consumer-rules.pro")
 
-        // 本地精简版 OpenCV:仅 arm64-v8a ABI(由本地 jniLibs 提供 libopencv_java4.so)
+        // 本地精简版 OpenCV: 多 ABI (由本地 jniLibs 提供 libopencv_java4.so)
+        //   arm64-v8a    : 现代手机(64位 ARM, 主流)
+        //   armeabi-v7a  : 老旧手机(32位 ARM, NEON 加速)
+        //   x86_64       : 模拟器测试用
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
 
