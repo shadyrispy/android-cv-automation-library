@@ -97,7 +97,7 @@ class ScenarioExecutorTest {
                     name = "self-disabling",
                     conditions = listOf(Condition.ImageAppears("btn")),
                     actions = listOf(
-                        Action.ToggleEvent("self-disabling", enabled = false),  // 关闭自己(用 name 作为 key)
+                        Action.ToggleEvent("e1", enabled = false),  // 用 Event.id 作为 key 关闭自己
                     ),
                 ),
             ),

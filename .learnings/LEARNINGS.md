@@ -517,7 +517,7 @@ nihui 主推"minimal native build"——只构建 native 静态库,不构建 Jav
 
 **Logged**: 2026-07-25T00:20:00+08:00
 **Priority**: medium
-**Status**: pending
+**Status**: resolved
 **Area**: backend
 
 ### Summary
@@ -539,11 +539,13 @@ Task 7 测试中暴露:`Action.ToggleEvent("e1", enabled = false)` 传入的是 
 3. `ScenarioExecutor` 中 `isEventEnabled(event.name)` 改为 `isEventEnabled(event.id)`
 4. 更新相关测试
 
-**当前不修改**:本次 workflow 模块已通过 29 测试,改动范围较大,留待宿主项目集成时一并处理。
+### Resolution
+- **Resolved**: 2026-07-25T00:35:00+08:00
+- **Notes**: 按建议修复:Action.ToggleEvent.eventName → eventId;ScenarioExecutor 3 处 .name → .id;ActionExecutor 引用同步更新;WorkflowDsl.toggleEvent 参数名同步;ScenarioExecutorTest 测试 3 改回用 id。29 测试全部通过。
 
 ### Metadata
 - Source: testing
-- Related Files: workflow/src/main/java/.../runtime/ProcessingState.kt, workflow/src/main/java/.../model/Action.kt, workflow/src/main/java/.../runtime/ScenarioExecutor.kt
+- Related Files: workflow/src/main/java/.../runtime/ProcessingState.kt, workflow/src/main/java/.../model/Action.kt, workflow/src/main/java/.../runtime/ScenarioExecutor.kt, workflow/src/main/java/.../runtime/ActionExecutor.kt, workflow/src/main/java/.../dsl/WorkflowDsl.kt
 - Tags: api-design, event-id, event-name, toggle-event
 - See Also: LRN-20260724-016
 

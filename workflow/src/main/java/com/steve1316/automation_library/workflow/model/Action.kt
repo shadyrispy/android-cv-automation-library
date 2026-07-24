@@ -69,7 +69,7 @@ sealed class Action {
     @Serializable
     @SerialName("toggle_event")
     data class ToggleEvent(
-        val eventName: String,
+        val eventId: String,
         val enabled: Boolean,
     ) : Action()
 

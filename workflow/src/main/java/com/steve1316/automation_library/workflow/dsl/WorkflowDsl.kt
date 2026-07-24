@@ -148,7 +148,7 @@ class ActionBuilder {
     fun scroll(scrollDown: Boolean = true, durationMs: Long = 500): Action = Action.Scroll(scrollDown, durationMs)
     fun wait(seconds: Double): Action = Action.Wait(seconds)
     fun changeCounter(name: String, delta: Long): Action = Action.ChangeCounter(name, delta)
-    fun toggleEvent(eventName: String, enabled: Boolean): Action = Action.ToggleEvent(eventName, enabled)
+    fun toggleEvent(eventId: String, enabled: Boolean): Action = Action.ToggleEvent(eventId, enabled)
     fun complete(): Action = Action.Complete
     fun custom(id: String): Action = Action.Custom(id)
 }

@@ -41,8 +41,8 @@ class ScenarioExecutor(
      */
     fun run(scenario: Scenario): Result {
         val state = initialState
-        // 初始化事件启用状态
-        state.initEvents(scenario.events.map { it.name to it.enabledOnStart })
+        // 初始化事件启用状态(用 Event.id 作为唯一 key,而非 name)
+        state.initEvents(scenario.events.map { it.id to it.enabledOnStart })
 
         val startTimeMs = System.currentTimeMillis()
         val maxDurationMs = if (scenario.maxDurationMinutes > 0) scenario.maxDurationMinutes * 60_000L else Long.MAX_VALUE
@@ -76,7 +76,7 @@ class ScenarioExecutor(
 
                 // 4a. 评估 Trigger events
                 for (event in triggerEvents) {
-                    if (!state.isEventEnabled(event.name)) continue
+                    if (!state.isEventEnabled(event.id)) continue
                     if (backend.isCancelled()) {
                         return Result(completedNormally = false, cancelled = true, eventsProcessed = eventsProcessed)
                     }
@@ -99,7 +99,7 @@ class ScenarioExecutor(
                 // 4b. 评估 Image events(仅当本轮没有 trigger action 执行)
                 if (!actionExecuted) {
                     for (event in sortedImageEvents) {
-                        if (!state.isEventEnabled(event.name)) continue
+                        if (!state.isEventEnabled(event.id)) continue
                         if (backend.isCancelled()) {
                             return Result(completedNormally = false, cancelled = true, eventsProcessed = eventsProcessed)
                         }

@@ -45,7 +45,7 @@ class ActionExecutor {
             }
 
             is Action.ToggleEvent -> {
-                state.setEventEnabled(action.eventName, action.enabled)
+                state.setEventEnabled(action.eventId, action.enabled)
                 true
             }
 
