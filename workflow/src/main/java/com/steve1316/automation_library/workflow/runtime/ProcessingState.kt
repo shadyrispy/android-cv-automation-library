@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap
 class ProcessingState(
     private val nowMsProvider: () -> Long = System::currentTimeMillis,
 ) {
-
     enum class Comparison { EQUAL, GREATER_OR_EQUAL, LESS_OR_EQUAL }
 
     // ====== 计数器 ======
@@ -41,6 +40,7 @@ class ProcessingState(
 
     // ====== 计时器 ======
     private data class TimerState(var startMs: Long, val durationMs: Long, val restart: Boolean)
+
     private val timers = ConcurrentHashMap<String, TimerState>()
 
     /** 启动一个计时器,以 [nowMsProvider] 当前值作为起始基线。 */
@@ -58,6 +58,9 @@ class ProcessingState(
         }
         return reached
     }
+
+    /** 检查计时器是否已存在(用于 ConditionsVerifier 判断是否需要自动启动)。 */
+    internal fun timerExists(name: String): Boolean = timers.containsKey(name)
 
     // ====== 事件启用状态 ======
     private val eventEnabled = ConcurrentHashMap<String, Boolean>()
