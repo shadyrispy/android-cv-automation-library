@@ -30,26 +30,33 @@ class ProcessingStateTest {
 
     @Test
     fun `timer starts fresh and reports reached after duration`() {
-        val state = ProcessingState()
+        var fakeNow = 0L
+        val state = ProcessingState(nowMsProvider = { fakeNow })
         state.startTimer("t1", durationMs = 100, restartWhenReached = false)
 
         // 未到时间
-        assertFalse(state.isTimerReached("t1", nowMs = 50))
+        fakeNow = 50L
+        assertFalse(state.isTimerReached("t1"))
         // 到达时间
-        assertTrue(state.isTimerReached("t1", nowMs = 100))
+        fakeNow = 100L
+        assertTrue(state.isTimerReached("t1"))
     }
 
     @Test
     fun `timer with restart resets start time after reached`() {
-        val state = ProcessingState()
+        var fakeNow = 0L
+        val state = ProcessingState(nowMsProvider = { fakeNow })
         state.startTimer("t2", durationMs = 100, restartWhenReached = true)
 
         // 100ms 时触发,重置 start = 100
-        assertTrue(state.isTimerReached("t2", nowMs = 100))
+        fakeNow = 100L
+        assertTrue(state.isTimerReached("t2"))
         // 199ms 时未到(从 100 起算)
-        assertFalse(state.isTimerReached("t2", nowMs = 199))
+        fakeNow = 199L
+        assertFalse(state.isTimerReached("t2"))
         // 200ms 时再次到
-        assertTrue(state.isTimerReached("t2", nowMs = 200))
+        fakeNow = 200L
+        assertTrue(state.isTimerReached("t2"))
     }
 
     @Test

@@ -43,12 +43,12 @@ class ProcessingState(
     private data class TimerState(var startMs: Long, val durationMs: Long, val restart: Boolean)
     private val timers = ConcurrentHashMap<String, TimerState>()
 
-    /** 启动一个计时器。nowMs 基线为 0,isTimerReached 的 nowMs 参数按相对 elapsed 时间计算。 */
+    /** 启动一个计时器,以 [nowMsProvider] 当前值作为起始基线。 */
     fun startTimer(name: String, durationMs: Long, restartWhenReached: Boolean) {
-        timers[name] = TimerState(0L, durationMs, restartWhenReached)
+        timers[name] = TimerState(nowMsProvider(), durationMs, restartWhenReached)
     }
 
-    /** 判断计时器是否到达。 */
+    /** 判断计时器是否到达。默认用 [nowMsProvider] 取当前时间,测试可注入 fake clock。 */
     fun isTimerReached(name: String, nowMs: Long = nowMsProvider()): Boolean {
         val timer = timers[name] ?: return false
         val elapsed = nowMs - timer.startMs
