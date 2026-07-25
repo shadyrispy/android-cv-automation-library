@@ -12,6 +12,8 @@ import com.steve1316.automation_library.workflow.model.ConditionOperator
  * - 昂贵条件(Image/Text)后求值,可被廉价条件短路跳过
  *
  * 当前实现按 conditions 列表顺序求值,调用方应自行按"廉价在前"排列。
+ *
+ * @param state 运行时状态
  */
 class ConditionsVerifier(private val state: ProcessingState) {
     /**
@@ -20,17 +22,22 @@ class ConditionsVerifier(private val state: ProcessingState) {
      * @param conditions 条件列表
      * @param operator 组合方式
      * @param backend 原子动作桥接
+     * @param contextKey 调用方传入的唯一标识(通常为 Event.id),用于隔离不同 Event 的 TimerReached 计时器
      * @return true=条件满足(Event 可触发),false=不满足
      */
     fun verify(
         conditions: List<Condition>,
         operator: ConditionOperator,
         backend: AutomationBackend,
+        contextKey: String = "default",
     ): Boolean {
         if (conditions.isEmpty()) return true // 无条件视为满足
 
-        for (condition in conditions) {
-            val satisfied = evaluateOne(condition, backend)
+        for ((index, condition) in conditions.withIndex()) {
+            // 取消检查:避免昂贵的 OCR/图像匹配在用户停止后继续执行
+            if (backend.isCancelled()) return false
+
+            val satisfied = evaluateOne(condition, backend, contextKey, index)
             when (operator) {
                 ConditionOperator.AND -> if (!satisfied) return false // 短路:遇 false 立即返回
                 ConditionOperator.OR -> if (satisfied) return true // 短路:遇 true 立即返回
@@ -40,7 +47,12 @@ class ConditionsVerifier(private val state: ProcessingState) {
         return operator == ConditionOperator.AND
     }
 
-    private fun evaluateOne(condition: Condition, backend: AutomationBackend): Boolean {
+    private fun evaluateOne(
+        condition: Condition,
+        backend: AutomationBackend,
+        contextKey: String,
+        index: Int,
+    ): Boolean {
         return when (condition) {
             is Condition.ImageAppears -> {
                 val hit =
@@ -74,8 +86,8 @@ class ConditionsVerifier(private val state: ProcessingState) {
                 )
 
             is Condition.TimerReached -> {
-                // 首次遇到时自动启动计时器
-                val timerName = "cond_${condition.hashCode()}"
+                // 用 contextKey + index 作为唯一 timer name,避免相同字段的 TimerReached 共享计时器
+                val timerName = "${contextKey}_timer_$index"
                 if (!state.timerExists(timerName)) {
                     state.startTimer(
                         timerName,
@@ -90,5 +102,8 @@ class ConditionsVerifier(private val state: ProcessingState) {
         }
     }
 
-    private fun List<Int>.toIntArray(): IntArray = if (size == 4) IntArray(4) { this[it] } else intArrayOf(0, 0, 0, 0)
+    private fun List<Int>.toIntArray(): IntArray {
+        require(size == 4) { "region must have 4 elements [x, y, w, h], got $size" }
+        return IntArray(4) { this[it] }
+    }
 }

@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProcessingStateTest {
-
     @Test
     fun `counter starts at zero and increments by delta`() {
         val state = ProcessingState()

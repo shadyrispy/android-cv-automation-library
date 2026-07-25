@@ -11,7 +11,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class Action {
-
     /** 点击指定坐标或模板中心。 */
     @Serializable
     @SerialName("tap")

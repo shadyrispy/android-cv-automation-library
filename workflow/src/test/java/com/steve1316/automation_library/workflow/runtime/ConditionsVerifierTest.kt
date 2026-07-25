@@ -102,4 +102,40 @@ class ConditionsVerifierTest {
         val conditions = listOf(Condition.TextMatches("已强化"))
         assertTrue(verifier.verify(conditions, ConditionOperator.AND, backend(textResult = "已强化+20")))
     }
+
+    @Test
+    fun `TimerReached returns false before duration and true after`() {
+        var fakeNow = 0L
+        val state = ProcessingState(nowMsProvider = { fakeNow })
+        val verifier = ConditionsVerifier(state)
+        val conditions = listOf(Condition.TimerReached(5000L))
+
+        // 0ms:未到
+        assertFalse(verifier.verify(conditions, ConditionOperator.AND, backend(), contextKey = "ev1"))
+        // 4999ms:未到
+        fakeNow = 4999L
+        assertFalse(verifier.verify(conditions, ConditionOperator.AND, backend(), contextKey = "ev1"))
+        // 5000ms:到达
+        fakeNow = 5000L
+        assertTrue(verifier.verify(conditions, ConditionOperator.AND, backend(), contextKey = "ev1"))
+    }
+
+    @Test
+    fun `TimerReached in different events do not share timer`() {
+        var fakeNow = 0L
+        val state = ProcessingState(nowMsProvider = { fakeNow })
+        val verifier = ConditionsVerifier(state)
+        val cond1 = Condition.TimerReached(5000L)
+        val cond2 = Condition.TimerReached(5000L)
+
+        // event1 启动计时器(基线 0ms)
+        assertFalse(verifier.verify(listOf(cond1), ConditionOperator.AND, backend(), contextKey = "ev1"))
+        // event2 启动独立计时器(基线也是 0ms,因为 fakeNow 没变)
+        assertFalse(verifier.verify(listOf(cond2), ConditionOperator.AND, backend(), contextKey = "ev2"))
+
+        // 推进到 5000ms,两个都到达(独立但基线相同)
+        fakeNow = 5000L
+        assertTrue(verifier.verify(listOf(cond1), ConditionOperator.AND, backend(), contextKey = "ev1"))
+        assertTrue(verifier.verify(listOf(cond2), ConditionOperator.AND, backend(), contextKey = "ev2"))
+    }
 }

@@ -9,12 +9,13 @@ import kotlinx.serialization.json.Json
  * - [ignoreUnknownKeys]: 容忍字段缺失(向前兼容)
  * - [encodeDefaults]: 编码默认值(保证反序列化完整)
  */
-val ScenarioJson: Json = Json {
-    prettyPrint = true
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-    classDiscriminator = "type"
-}
+val ScenarioJson: Json =
+    Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        classDiscriminator = "type"
+    }
 
 /** 将 [Scenario] 序列化为 JSON 字符串。 */
 fun Scenario.toJson(): String = ScenarioJson.encodeToString(Scenario.serializer(), this)

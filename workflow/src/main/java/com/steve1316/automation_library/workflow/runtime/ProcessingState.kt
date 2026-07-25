@@ -39,7 +39,24 @@ class ProcessingState(
     }
 
     // ====== 计时器 ======
-    private data class TimerState(var startMs: Long, val durationMs: Long, val restart: Boolean)
+    private class TimerState(
+        startMs: Long,
+        val durationMs: Long,
+        val restart: Boolean,
+    ) {
+        @Volatile
+        private var startMs: Long = startMs
+
+        fun reachedAt(nowMs: Long): Boolean =
+            synchronized(this) {
+                val elapsed = nowMs - startMs
+                val reached = elapsed >= durationMs
+                if (reached && restart) {
+                    startMs = nowMs
+                }
+                reached
+            }
+    }
 
     private val timers = ConcurrentHashMap<String, TimerState>()
 
@@ -51,12 +68,7 @@ class ProcessingState(
     /** 判断计时器是否到达。默认用 [nowMsProvider] 取当前时间,测试可注入 fake clock。 */
     fun isTimerReached(name: String, nowMs: Long = nowMsProvider()): Boolean {
         val timer = timers[name] ?: return false
-        val elapsed = nowMs - timer.startMs
-        val reached = elapsed >= timer.durationMs
-        if (reached && timer.restart) {
-            timer.startMs = nowMs
-        }
-        return reached
+        return timer.reachedAt(nowMs)
     }
 
     /** 检查计时器是否已存在(用于 ConditionsVerifier 判断是否需要自动启动)。 */

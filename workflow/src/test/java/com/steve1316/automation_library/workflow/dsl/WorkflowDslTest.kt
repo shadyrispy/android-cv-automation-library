@@ -9,17 +9,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkflowDslTest {
-
     @Test
     fun `scenario dsl builds scenario with events`() {
-        val scenario = scenario(id = "test", name = "Test") {
-            imageEvent(id = "e1", name = "click-btn") {
-                conditionOperator = ConditionOperator.AND
-                condition { imageAppears("button", confidence = 0.9) }
-                action { tap(100.0, 200.0) }
-                action { complete() }
+        val scenario =
+            scenario(id = "test", name = "Test") {
+                imageEvent(id = "e1", name = "click-btn") {
+                    conditionOperator = ConditionOperator.AND
+                    condition { imageAppears("button", confidence = 0.9) }
+                    action { tap(100.0, 200.0) }
+                    action { complete() }
+                }
             }
-        }
 
         assertEquals("test", scenario.id)
         assertEquals(1, scenario.events.size)
@@ -38,12 +38,13 @@ class WorkflowDslTest {
 
     @Test
     fun `dsl supports trigger events`() {
-        val scenario = scenario(id = "s", name = "n") {
-            triggerEvent(id = "t1", name = "timer") {
-                condition { timerReached(5000L) }
-                action { wait(0.5) }
+        val scenario =
+            scenario(id = "s", name = "n") {
+                triggerEvent(id = "t1", name = "timer") {
+                    condition { timerReached(5000L) }
+                    action { wait(0.5) }
+                }
             }
-        }
 
         assertEquals(1, scenario.events.size)
         assertTrue(scenario.events[0] is Event.Trigger)
@@ -51,14 +52,15 @@ class WorkflowDslTest {
 
     @Test
     fun `dsl supports or conditions`() {
-        val scenario = scenario(id = "s", name = "n") {
-            imageEvent(id = "e1", name = "test") {
-                conditionOperator = ConditionOperator.OR
-                condition { counterReached("c1", 10) }
-                condition { imageAppears("rare") }
-                action { tap(0.0, 0.0) }
+        val scenario =
+            scenario(id = "s", name = "n") {
+                imageEvent(id = "e1", name = "test") {
+                    conditionOperator = ConditionOperator.OR
+                    condition { counterReached("c1", 10) }
+                    condition { imageAppears("rare") }
+                    action { tap(0.0, 0.0) }
+                }
             }
-        }
 
         assertEquals(ConditionOperator.OR, scenario.events[0].conditionOperator)
         assertEquals(2, scenario.events[0].conditions.size)

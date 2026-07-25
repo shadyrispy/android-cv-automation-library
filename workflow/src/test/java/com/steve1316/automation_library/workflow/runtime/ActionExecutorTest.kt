@@ -10,7 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActionExecutorTest {
-
     private val noopLogger = object : StepLogger {}
 
     private inner class FakeBackend : AutomationBackend {
@@ -23,27 +22,46 @@ class ActionExecutorTest {
         var toggledEvents = mutableMapOf<String, Boolean>()
         var customActionsExecuted = mutableListOf<String>()
         var cancelled = false
+        var tapResult = true
+        var longPressResult = true
+        var swipeResult = true
+        var scrollResult = true
+        var customResult = true
+        var lastLongPressDuration: Long? = null
 
         override fun findImage(templateName: String, confidence: Double, region: IntArray) = PointF(0f, 0f)
+
         override fun findText(text: String, region: IntArray, similarity: Double) = text
+
         override fun tap(x: Double, y: Double, imageName: String?): Boolean {
             lastTap = x to y
-            return true
+            return tapResult
         }
-        override fun longPress(x: Double, y: Double, imageName: String?, durationMs: Long) = true
+
+        override fun longPress(x: Double, y: Double, imageName: String?, durationMs: Long): Boolean {
+            lastLongPressDuration = durationMs
+            return longPressResult
+        }
+
         override fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long): Boolean {
             lastSwipe = listOf(startX, startY, endX, endY)
-            return true
+            return swipeResult
         }
+
         override fun scroll(scrollDown: Boolean, durationMs: Long): Boolean {
             lastScrollDown = scrollDown
-            return true
+            return scrollResult
         }
-        override fun wait(seconds: Double) { lastWaitSeconds = seconds }
+
+        override fun wait(seconds: Double) {
+            lastWaitSeconds = seconds
+        }
+
         override fun executeCustomAction(id: String): Boolean {
             customActionsExecuted.add(id)
-            return true
+            return customResult
         }
+
         override fun isCancelled() = cancelled
     }
 
@@ -108,5 +126,45 @@ class ActionExecutorTest {
         val executor = ActionExecutor()
         val shouldContinue = executor.execute(Action.Tap(0.0, 0.0), FakeBackend(), ProcessingState())
         assertTrue(shouldContinue)
+    }
+
+    @Test
+    fun `tap failure returns false to signal stop`() {
+        val backend = FakeBackend().apply { tapResult = false }
+        val executor = ActionExecutor()
+        val shouldContinue = executor.execute(Action.Tap(0.0, 0.0), backend, ProcessingState())
+        assertFalse(shouldContinue)
+    }
+
+    @Test
+    fun `long press passes duration to backend`() {
+        val backend = FakeBackend()
+        val executor = ActionExecutor()
+        executor.execute(Action.LongPress(50.0, 60.0, durationMs = 2000), backend, ProcessingState())
+        assertEquals(2000L, backend.lastLongPressDuration)
+    }
+
+    @Test
+    fun `swipe passes coordinates to backend`() {
+        val backend = FakeBackend()
+        val executor = ActionExecutor()
+        executor.execute(Action.Swipe(10f, 20f, 30f, 40f, durationMs = 300), backend, ProcessingState())
+        assertEquals(listOf(10f, 20f, 30f, 40f), backend.lastSwipe)
+    }
+
+    @Test
+    fun `scroll failure returns false to signal stop`() {
+        val backend = FakeBackend().apply { scrollResult = false }
+        val executor = ActionExecutor()
+        val shouldContinue = executor.execute(Action.Scroll(), backend, ProcessingState())
+        assertFalse(shouldContinue)
+    }
+
+    @Test
+    fun `custom action failure returns false to signal stop`() {
+        val backend = FakeBackend().apply { customResult = false }
+        val executor = ActionExecutor()
+        val shouldContinue = executor.execute(Action.Custom("scan"), backend, ProcessingState())
+        assertFalse(shouldContinue)
     }
 }

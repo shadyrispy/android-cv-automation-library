@@ -8,31 +8,18 @@ import com.steve1316.automation_library.workflow.model.Action
  *
  * 每次执行返回 Boolean:
  * - true: 继续执行下一个 action
- * - false: 收到 [Action.Complete],Executor 应结束整个 Scenario
+ * - false: 收到 [Action.Complete] 或 backend 返回 false(动作失败),Executor 应结束整个 Scenario
  */
 class ActionExecutor {
-
     fun execute(action: Action, backend: AutomationBackend, state: ProcessingState): Boolean {
         return when (action) {
-            is Action.Tap -> {
-                backend.tap(action.x, action.y, action.imageName)
-                true
-            }
+            is Action.Tap -> backend.tap(action.x, action.y, action.imageName)
 
-            is Action.LongPress -> {
-                backend.longPress(action.x, action.y, action.imageName, action.durationMs)
-                true
-            }
+            is Action.LongPress -> backend.longPress(action.x, action.y, action.imageName, action.durationMs)
 
-            is Action.Swipe -> {
-                backend.swipe(action.startX, action.startY, action.endX, action.endY, action.durationMs)
-                true
-            }
+            is Action.Swipe -> backend.swipe(action.startX, action.startY, action.endX, action.endY, action.durationMs)
 
-            is Action.Scroll -> {
-                backend.scroll(action.scrollDown, action.durationMs)
-                true
-            }
+            is Action.Scroll -> backend.scroll(action.scrollDown, action.durationMs)
 
             is Action.Wait -> {
                 backend.wait(action.seconds)
@@ -51,10 +38,7 @@ class ActionExecutor {
 
             is Action.Complete -> false
 
-            is Action.Custom -> {
-                backend.executeCustomAction(action.id)
-                true
-            }
+            is Action.Custom -> backend.executeCustomAction(action.id)
         }
     }
 }

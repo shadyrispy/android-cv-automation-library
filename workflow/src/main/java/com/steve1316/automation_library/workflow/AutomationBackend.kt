@@ -18,7 +18,6 @@ import com.steve1316.automation_library.workflow.logging.StepLogger
  * 实现方可使用 `runBlocking` 包裹协程代码(与现有 ImageUtils.wait() 一致)。
  */
 interface AutomationBackend {
-
     /** 日志器,由 Executor 注入。 */
     val logger: StepLogger
 

@@ -5,31 +5,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScenarioSerializationTest {
-
     @Test
     fun `scenario with image event round trips through json`() {
-        val original = Scenario(
-            id = "scan",
-            name = "Test Scan",
-            events = listOf(
-                Event.Image(
-                    id = "e1",
-                    name = "find-button",
-                    conditionOperator = ConditionOperator.AND,
-                    conditions = listOf(
-                        Condition.ImageAppears("btn", confidence = 0.9),
-                        Condition.CounterReached("clicks", 5),
+        val original =
+            Scenario(
+                id = "scan",
+                name = "Test Scan",
+                events =
+                    listOf(
+                        Event.Image(
+                            id = "e1",
+                            name = "find-button",
+                            conditionOperator = ConditionOperator.AND,
+                            conditions =
+                                listOf(
+                                    Condition.ImageAppears("btn", confidence = 0.9),
+                                    Condition.CounterReached("clicks", 5),
+                                ),
+                            actions =
+                                listOf(
+                                    Action.Tap(100.0, 200.0, imageName = "btn"),
+                                    Action.Complete,
+                                ),
+                            priority = 1,
+                            keepEvaluating = false,
+                        ),
                     ),
-                    actions = listOf(
-                        Action.Tap(100.0, 200.0, imageName = "btn"),
-                        Action.Complete,
-                    ),
-                    priority = 1,
-                    keepEvaluating = false,
-                ),
-            ),
-            maxDurationMinutes = 30,
-        )
+                maxDurationMinutes = 30,
+            )
 
         val jsonString = original.toJson()
         val restored = scenarioFromJson(jsonString)
@@ -52,24 +55,26 @@ class ScenarioSerializationTest {
 
     @Test
     fun `scenario with mixed trigger and image events round trips`() {
-        val original = Scenario(
-            id = "mixed",
-            name = "Mixed",
-            events = listOf(
-                Event.Trigger(
-                    id = "t1",
-                    name = "timer",
-                    conditions = listOf(Condition.TimerReached(5000L, restartWhenReached = true)),
-                    actions = listOf(Action.Wait(0.5)),
-                ),
-                Event.Image(
-                    id = "i1",
-                    name = "image",
-                    conditions = listOf(Condition.TextMatches("hello")),
-                    actions = listOf(Action.Scroll(scrollDown = true)),
-                ),
-            ),
-        )
+        val original =
+            Scenario(
+                id = "mixed",
+                name = "Mixed",
+                events =
+                    listOf(
+                        Event.Trigger(
+                            id = "t1",
+                            name = "timer",
+                            conditions = listOf(Condition.TimerReached(5000L, restartWhenReached = true)),
+                            actions = listOf(Action.Wait(0.5)),
+                        ),
+                        Event.Image(
+                            id = "i1",
+                            name = "image",
+                            conditions = listOf(Condition.TextMatches("hello")),
+                            actions = listOf(Action.Scroll(scrollDown = true)),
+                        ),
+                    ),
+            )
 
         val jsonString = original.toJson()
         val restored = scenarioFromJson(jsonString)

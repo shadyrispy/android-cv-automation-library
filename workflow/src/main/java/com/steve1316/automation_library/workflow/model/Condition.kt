@@ -11,7 +11,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class Condition {
-
     /**
      * 图像模板匹配条件:屏幕上是否出现指定模板。
      *
@@ -58,7 +57,6 @@ sealed class Condition {
         val targetValue: Long,
         val comparison: Comparison = Comparison.GREATER_OR_EQUAL,
     ) : Condition() {
-
         @Serializable
         enum class Comparison {
             EQUAL,

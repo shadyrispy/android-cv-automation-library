@@ -15,7 +15,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class Event {
-
     abstract val id: String
     abstract val name: String
     abstract val conditionOperator: ConditionOperator

@@ -6,7 +6,6 @@ package com.steve1316.automation_library.workflow.logging
  * 所有方法都是同步的,调用方在合适的线程调用。
  */
 interface StepLogger {
-
     /** 记录 Event 评估开始。 */
     fun onEventEvaluated(eventName: String, satisfied: Boolean) {}
 

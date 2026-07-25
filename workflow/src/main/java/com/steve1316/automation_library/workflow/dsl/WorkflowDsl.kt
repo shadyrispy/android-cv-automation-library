@@ -82,18 +82,21 @@ class ImageEventBuilder(
     private val keepEvaluating: Boolean = false,
     enabledOnStart: Boolean,
 ) : EventBuilder(id, name) {
-    init { this.enabledOnStart = enabledOnStart }
+    init {
+        this.enabledOnStart = enabledOnStart
+    }
 
-    fun build(): Event.Image = Event.Image(
-        id = id,
-        name = name,
-        conditionOperator = conditionOperator,
-        conditions = conditions.toList(),
-        actions = actions.toList(),
-        enabledOnStart = enabledOnStart,
-        priority = priority,
-        keepEvaluating = keepEvaluating,
-    )
+    fun build(): Event.Image =
+        Event.Image(
+            id = id,
+            name = name,
+            conditionOperator = conditionOperator,
+            conditions = conditions.toList(),
+            actions = actions.toList(),
+            enabledOnStart = enabledOnStart,
+            priority = priority,
+            keepEvaluating = keepEvaluating,
+        )
 }
 
 @WorkflowDslMarker
@@ -102,16 +105,19 @@ class TriggerEventBuilder(
     name: String,
     enabledOnStart: Boolean,
 ) : EventBuilder(id, name) {
-    init { this.enabledOnStart = enabledOnStart }
+    init {
+        this.enabledOnStart = enabledOnStart
+    }
 
-    fun build(): Event.Trigger = Event.Trigger(
-        id = id,
-        name = name,
-        conditionOperator = conditionOperator,
-        conditions = conditions.toList(),
-        actions = actions.toList(),
-        enabledOnStart = enabledOnStart,
-    )
+    fun build(): Event.Trigger =
+        Event.Trigger(
+            id = id,
+            name = name,
+            conditionOperator = conditionOperator,
+            conditions = conditions.toList(),
+            actions = actions.toList(),
+            enabledOnStart = enabledOnStart,
+        )
 }
 
 @WorkflowDslMarker
@@ -141,15 +147,23 @@ class ConditionBuilder {
 @WorkflowDslMarker
 class ActionBuilder {
     fun tap(x: Double, y: Double, imageName: String? = null): Action = Action.Tap(x, y, imageName)
+
     fun longPress(x: Double, y: Double, imageName: String? = null, durationMs: Long = 1000): Action =
         Action.LongPress(x, y, imageName, durationMs)
+
     fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long = 500): Action =
         Action.Swipe(startX, startY, endX, endY, durationMs)
+
     fun scroll(scrollDown: Boolean = true, durationMs: Long = 500): Action = Action.Scroll(scrollDown, durationMs)
+
     fun wait(seconds: Double): Action = Action.Wait(seconds)
+
     fun changeCounter(name: String, delta: Long): Action = Action.ChangeCounter(name, delta)
+
     fun toggleEvent(eventId: String, enabled: Boolean): Action = Action.ToggleEvent(eventId, enabled)
+
     fun complete(): Action = Action.Complete
+
     fun custom(id: String): Action = Action.Custom(id)
 }
 
